@@ -1,0 +1,31 @@
+# 빌드 산출물
+bin/
+obj/
+.vs/
+*.user
+
+# ── 로컬 전용 (git에 올리지 않음) ─────────────────────────────
+# 이 저장소에는 코드와 태그 사전(data/*.csv)만 올린다.
+# 레시피·풀 같은 컨셉 데이터와 제작 문서는 전부 로컬에만 둔다.
+# 앱은 아래 파일이 없어도 정상 기동한다(전부 빈 값으로 폴백).
+
+# 컨셉 데이터
+data/presets/
+data/conflicts.csv
+data/anima-phrases.csv
+
+# 제작 문서·작업 기록
+guide.md
+WORKLOG.md
+docs/
+
+# 개발용 스캐너와 그 실행 결과
+tools/
+
+# 태그 원본 덤프 (앱은 data/*.csv만 읽는다)
+tags/
+
+# 작업 중 생긴 임시 파일·개발 환경 부산물
+_scr_*.txt
+.superpowers/
+*.lnk

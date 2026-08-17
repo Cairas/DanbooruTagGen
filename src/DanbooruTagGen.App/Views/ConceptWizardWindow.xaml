@@ -1,0 +1,69 @@
+<Window x:Class="DanbooruTagGen.App.Views.ConceptWizardWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="컨셉 빌더" Height="600" Width="760">
+    <DockPanel Margin="8">
+        <!-- 상단: 테마 키워드 입력 -->
+        <DockPanel DockPanel.Dock="Top">
+            <TextBlock DockPanel.Dock="Left" Text="테마: " VerticalAlignment="Center" FontWeight="Bold"/>
+            <Button DockPanel.Dock="Right" Content="검색" Margin="4,0,0,0" Padding="12,2" Command="{Binding SearchCommand}"/>
+            <TextBox Text="{Binding Keyword, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="한국어/영어 키워드. 태그 이름·동의어·설명까지 검색합니다.">
+                <TextBox.InputBindings>
+                    <KeyBinding Key="Enter" Command="{Binding SearchCommand}"/>
+                </TextBox.InputBindings>
+            </TextBox>
+        </DockPanel>
+        <!-- 추천 키워드 칩: 빈 화면에서 뭘 칠지 막막할 때 바로 눌러서 시작 -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,4,0,0">
+            <TextBlock Text="추천: " VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
+            <ItemsControl ItemsSource="{Binding SuggestedKeywords}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Button Content="{Binding}" Margin="0,0,3,3" Padding="7,1" FontSize="11"
+                                Command="{Binding DataContext.UseSuggestionCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                                CommandParameter="{Binding}"/>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding StatusText}" Foreground="Gray" FontSize="11"
+                   TextWrapping="Wrap" Margin="0,4"/>
+        <!-- 하단: 생성 옵션 + 버튼 -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,6,0,0">
+            <CheckBox DockPanel.Dock="Left" IsChecked="{Binding IncludeBaseAxes}" VerticalAlignment="Center"
+                      Content="기본 변주 축(구도·감정) 자동 추가"
+                      ToolTip="거의 모든 컨셉에 효과적인 [축] 구도·카메라, [축] 감정·표정 랜덤 슬롯을 함께 붙입니다."/>
+            <Button DockPanel.Dock="Right" Content="레시피 빌더로 보내기" FontWeight="Bold" Padding="12,4"
+                    Command="{Binding CreateRecipeCommand}"
+                    ToolTip="체크한 태그를 카테고리별 [랜덤] 슬롯으로 만들어 레시피 빌더의 현재 구성을 교체합니다."/>
+            <Border/>
+        </DockPanel>
+        <!-- 결과: 카테고리별 체크 목록 -->
+        <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,2">
+            <ItemsControl ItemsSource="{Binding Groups}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <GroupBox Header="{Binding Name}" Margin="0,0,0,6" Padding="4">
+                            <ItemsControl ItemsSource="{Binding Items}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsChecked}" Content="{Binding Display}"
+                                                  Margin="0,0,10,4" ToolTip="{Binding Tooltip}"
+                                                  ToolTipService.InitialShowDelay="100"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </GroupBox>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+    </DockPanel>
+</Window>

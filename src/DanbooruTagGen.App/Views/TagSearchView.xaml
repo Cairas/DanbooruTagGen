@@ -1,0 +1,88 @@
+<UserControl x:Class="DanbooruTagGen.App.Views.TagSearchView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <DockPanel Margin="8">
+        <TextBlock DockPanel.Dock="Top" Text="태그 검색" FontWeight="Bold" Margin="0,0,0,4"/>
+        <!-- 일반/성인 필터: 카테고리·검색과 함께 적용됨(예: 체위+성인, 의상+일반)
+             지금 뭐가 눌려있는지 배경색으로 표시(예전엔 오른쪽 회색 텍스트로만 알 수 있었음) -->
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,4">
+            <TextBlock Text="필터:" VerticalAlignment="Center" Margin="0,0,4,0" Foreground="Gray"/>
+            <Button Content="전체" Padding="10,1"
+                    Command="{Binding SelectNsfwFilterCommand}" CommandParameter="all"
+                    Background="{Binding NsfwFilter, Converter={StaticResource NsfwFilterToBrush}, ConverterParameter=all}"/>
+            <Button Content="일반" Padding="10,1" Margin="3,0"
+                    Command="{Binding SelectNsfwFilterCommand}" CommandParameter="sfw"
+                    Background="{Binding NsfwFilter, Converter={StaticResource NsfwFilterToBrush}, ConverterParameter=sfw}"/>
+            <Button Content="🔞 성인" Padding="10,1"
+                    Command="{Binding SelectNsfwFilterCommand}" CommandParameter="nsfw"
+                    Background="{Binding NsfwFilter, Converter={StaticResource NsfwFilterToBrush}, ConverterParameter=nsfw}"/>
+        </StackPanel>
+        <!-- 카테고리 버튼: 누르면 그 그룹 태그가 쭉 검색됨(위 필터와 결합).
+             17개나 나열돼 있어 지금 뭐가 활성인지 배경색으로 표시. -->
+        <ItemsControl DockPanel.Dock="Top" ItemsSource="{Binding Categories}" Margin="0,0,0,4">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Button Content="{Binding Label}" Margin="0,0,3,3" Padding="6,1"
+                            Command="{Binding DataContext.SelectCategoryCommand, RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                            CommandParameter="{Binding Keyword}">
+                        <Button.Background>
+                            <MultiBinding Converter="{StaticResource CategoryActiveToBrush}">
+                                <Binding Path="Keyword"/>
+                                <Binding Path="DataContext.ActiveCategoryKeyword" RelativeSource="{RelativeSource AncestorType=ItemsControl}"/>
+                            </MultiBinding>
+                        </Button.Background>
+                    </Button>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <!-- 한글 IME 조합 중에도 즉시 검색되도록 TextChanged로 직접 갱신(바인딩은 IME 조합 중 갱신 안 됨) -->
+        <TextBox DockPanel.Dock="Top" x:Name="SearchBox" TextChanged="SearchBox_TextChanged"/>
+        <TextBlock DockPanel.Dock="Top"
+                   Text="한글/영문으로 검색해 더블클릭(또는 ‘추가’). 예: 미소, 비키니, 표정, 체위. 항목에 마우스를 올리면 설명이 나옵니다."
+                   Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,2,0,2"/>
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
+            <Button DockPanel.Dock="Right" Content="⭐" Margin="4,0,0,0" Padding="8,0"
+                    Command="{Binding ToggleFavoriteCommand}"
+                    ToolTip="선택한 태그를 즐겨찾기에 추가/해제합니다. 상단 '⭐ 즐겨찾기' 버튼으로 모아볼 수 있습니다."/>
+            <Button Content="＋ 슬롯/풀에 추가" Command="{Binding AddSelectedCommand}"/>
+        </DockPanel>
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding AddHint}" Foreground="#C62828" FontSize="11"
+                   TextWrapping="Wrap" Margin="0,2,0,0"
+                   Visibility="{Binding AddHint, Converter={StaticResource NonEmptyToVis}}"/>
+        <ListBox ItemsSource="{Binding Results}" SelectedItem="{Binding SelectedTag}" Margin="0,4,0,0"
+                 HorizontalContentAlignment="Stretch"
+                 MouseDoubleClick="Results_MouseDoubleClick">
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <!-- Background=Transparent: 행 전체가 호버 적중 영역이 되어 툴팁이 안정적으로 뜸 -->
+                    <Border Background="Transparent"
+                            ToolTipService.InitialShowDelay="100"
+                            ToolTipService.ShowDuration="30000">
+                        <Border.ToolTip>
+                            <StackPanel MaxWidth="360">
+                                <TextBlock Text="{Binding Name, Converter={StaticResource UnderToSpace}}" FontWeight="Bold" FontSize="13"/>
+                                <TextBlock Text="{Binding Description}" TextWrapping="Wrap" Margin="0,3,0,3"
+                                           Visibility="{Binding Description, Converter={StaticResource NonEmptyToVis}}"/>
+                                <TextBlock Text="{Binding Category, StringFormat='카테고리: {0}'}" Foreground="Gray" FontSize="11"/>
+                                <TextBlock Text="{Binding PostCount, StringFormat='빈도: {0:N0}'}" Foreground="Gray" FontSize="11"/>
+                                <TextBlock Text="{Binding Aliases, Converter={StaticResource AliasesToText}}"
+                                           TextWrapping="Wrap" Foreground="Gray" FontSize="11"/>
+                            </StackPanel>
+                        </Border.ToolTip>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="10" Height="10" Margin="0,0,6,0" VerticalAlignment="Center"
+                                     Fill="{Binding Category, Converter={StaticResource CategoryToBrush}}"/>
+                            <TextBlock Text="{Binding Name, Converter={StaticResource UnderToSpace}}"/>
+                            <TextBlock Text="🔞" Margin="4,0,0,0" VerticalAlignment="Center"
+                                       Visibility="{Binding IsNsfw, Converter={StaticResource BoolToVis}}"/>
+                            <TextBlock Text="{Binding PostCount, StringFormat=' ({0:N0})'}" Foreground="Gray"/>
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+    </DockPanel>
+</UserControl>

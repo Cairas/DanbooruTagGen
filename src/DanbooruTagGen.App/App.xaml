@@ -1,0 +1,35 @@
+<Application x:Class="DanbooruTagGen.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:DanbooruTagGen.App"
+             xmlns:conv="clr-namespace:DanbooruTagGen.App.Converters"
+             xmlns:vm="clr-namespace:DanbooruTagGen.App.ViewModels"
+             xmlns:views="clr-namespace:DanbooruTagGen.App.Views">
+    <Application.Resources>
+        <ResourceDictionary>
+            <conv:CategoryToBrushConverter x:Key="CategoryToBrush"/>
+            <conv:AliasesToTextConverter x:Key="AliasesToText"/>
+            <conv:StringToVisibilityConverter x:Key="NonEmptyToVis"/>
+            <conv:UnderscoreToSpaceConverter x:Key="UnderToSpace"/>
+            <conv:ZeroToVisibilityConverter x:Key="ZeroToVis"/>
+            <conv:AllEmptyToVisibilityConverter x:Key="AllEmptyToVis"/>
+            <conv:TagTooltipConverter x:Key="TagTooltip"/>
+            <conv:InverseBoolToVisibilityConverter x:Key="InverseBoolToVis"/>
+            <conv:NsfwFilterToBrushConverter x:Key="NsfwFilterToBrush"/>
+            <conv:FavoriteStarTextConverter x:Key="FavoriteStarText"/>
+            <conv:CategoryActiveToBrushConverter x:Key="CategoryActiveToBrush"/>
+            <conv:PoolCandidatesTextConverter x:Key="PoolCandidatesText"/>
+            <conv:PoolIdToNameConverter x:Key="PoolIdToName"/>
+            <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+            <DataTemplate DataType="{x:Type vm:TagSearchViewModel}">
+                <views:TagSearchView/>
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:RecipeBuilderViewModel}">
+                <views:RecipeBuilderView/>
+            </DataTemplate>
+            <DataTemplate DataType="{x:Type vm:GenerationViewModel}">
+                <views:GenerationView/>
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

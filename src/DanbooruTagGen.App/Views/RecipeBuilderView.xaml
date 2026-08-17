@@ -1,0 +1,288 @@
+<UserControl x:Class="DanbooruTagGen.App.Views.RecipeBuilderView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:m="clr-namespace:DanbooruTagGen.Core.Models;assembly=DanbooruTagGen.Core">
+    <DockPanel Margin="8">
+        <TextBlock DockPanel.Dock="Top" Text="레시피 빌더 (슬롯 순서)" FontWeight="Bold"/>
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,4">
+            <Button Content="+고정" Command="{Binding AddFixedSlotCommand}"/>
+            <Button Content="+랜덤풀" Command="{Binding AddRandomPoolSlotCommand}" Margin="4,0"/>
+            <Button Content="+대안" Command="{Binding AddAlternativeSlotCommand}" Margin="0,0,4,0"
+                    ToolTip="'이 컨셉을 표현하는 방법 A vs 방법 B'처럼 서로 섞이면 안 되는 태그 묶음들 중&#10;매 줄 하나만 통째로 뽑히는 슬롯을 추가합니다."/>
+            <Button Content="삭제" Command="{Binding RemoveSlotCommand}"/>
+            <Button Content="▲" Command="{Binding MoveUpCommand}" Margin="4,0,0,0"/>
+            <Button Content="▼" Command="{Binding MoveDownCommand}"/>
+            <Button Content="레시피 저장" Command="{Binding SaveRecipeCommand}" Margin="8,0,0,0"
+                    ToolTip="현재 슬롯 구성을 저장(다음 실행 시 자동으로 불러옵니다). 창을 닫을 때도 자동 저장됩니다."/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" Foreground="Gray" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,4"
+                   Text="슬롯을 먼저 선택하면 그 슬롯으로 태그가 들어갑니다. [고정] 선택 → 항상 출력되는 태그, [랜덤] 선택 → 그 슬롯의 후보로 추가. 왼쪽에서 태그를 더블클릭하세요. 슬롯을 우클릭하면 풀 라이브러리에 저장됩니다."/>
+        <!-- 검색을 거치지 않는 자유 입력: DB에 없는 자연어 구문도 그대로 슬롯에 들어간다 -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+            <TextBlock DockPanel.Dock="Left" Text="직접 입력: " VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
+            <Button DockPanel.Dock="Right" Content="추가" Margin="4,0,0,0" Command="{Binding AddCustomTagCommand}"/>
+            <TextBox Text="{Binding CustomTagInput, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="선택한 슬롯에 그대로 추가합니다. 콤마로 여러 개 입력 가능. DB에 없는 자연어 문구도 허용.">
+                <TextBox.InputBindings>
+                    <KeyBinding Key="Enter" Command="{Binding AddCustomTagCommand}"/>
+                </TextBox.InputBindings>
+            </TextBox>
+        </DockPanel>
+        <!-- 모순 사전 경고: 고정끼리는 '항상', 풀 후보 포함이면 '가끔' 충돌 가능 -->
+        <Border DockPanel.Dock="Top" Background="#FFFDE7" BorderBrush="#FBC02D" BorderThickness="1"
+                Padding="6" Margin="0,0,0,4"
+                Visibility="{Binding ConflictWarning, Converter={StaticResource NonEmptyToVis}}">
+            <TextBlock Text="{Binding ConflictWarning}" Foreground="#795548" TextWrapping="Wrap" FontSize="11"/>
+        </Border>
+        <ListBox ItemsSource="{Binding Slots}" SelectedItem="{Binding SelectedSlot}"
+                 HorizontalContentAlignment="Stretch"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 KeyDown="SlotsList_KeyDown">
+            <ListBox.Resources>
+                <!-- 슬롯 라벨: 평소엔 텍스트만 보이다가 더블클릭하거나(선택 상태에서) F2를
+                     누르면 텍스트박스로 바뀌어 이름을 바로 고칠 수 있다. 예전엔 풀 라이브러리에
+                     저장할 때만(그 풀의 이름으로) 고칠 수 있었음. -->
+                <DataTemplate x:Key="SlotLabelEditor">
+                    <Grid>
+                        <TextBlock Text="{Binding Label}" MouseLeftButtonDown="SlotLabel_MouseLeftButtonDown"
+                                   Visibility="{Binding IsEditingLabel, Converter={StaticResource InverseBoolToVis}}"/>
+                        <TextBox x:Name="LabelEditor" Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" MinWidth="60"
+                                 Visibility="{Binding IsEditingLabel, Converter={StaticResource BoolToVis}}"
+                                 LostFocus="SlotLabelEditor_LostFocus" KeyDown="SlotLabelEditor_KeyDown"/>
+                    </Grid>
+                </DataTemplate>
+                <!-- 태그 칩 하나: 이름 표시 + 클릭 시 제거. 호버하면 태그 DB에서 조회한
+                     설명/카테고리/빈도/별칭을 툴팁으로 보여준다(레시피 빌더엔 이게 없었음). -->
+                <DataTemplate x:Key="TagChip">
+                    <Button Margin="0,0,4,2" Padding="4,0" Click="TagChip_Click" Tag="{Binding}"
+                            ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="30000">
+                      <Button.ToolTip>
+                          <MultiBinding Converter="{StaticResource TagTooltip}">
+                              <Binding/>
+                              <Binding Path="DataContext.TagInfo" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                          </MultiBinding>
+                      </Button.ToolTip>
+                      <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="{Binding Converter={StaticResource UnderToSpace}}"/>
+                        <TextBlock Text="  ✕" Foreground="Gray"/>
+                      </StackPanel>
+                    </Button>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type m:FixedSlot}">
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Style.Triggers>
+                                    <!-- 꺼둔 슬롯은 지우지 않고 흐리게만 표시 — 삭제/재입력 없이 잠깐 껐다 켤 수 있음 -->
+                                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                        <Setter Property="Opacity" Value="0.45"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <StackPanel.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="이 슬롯을 풀 라이브러리에 저장" Click="SaveSlotToPool_Click"/>
+                            </ContextMenu>
+                        </StackPanel.ContextMenu>
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox IsChecked="{Binding IsEnabled}" VerticalAlignment="Center" Margin="0,0,4,0"
+                                      Checked="SlotEnabled_Changed" Unchecked="SlotEnabled_Changed"
+                                      ToolTip="끄면 이 슬롯을 지우지 않고도 생성에서 제외합니다."/>
+                            <TextBlock Text="[고정] " FontWeight="Bold"/>
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SlotLabelEditor}"/>
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding Tags}" ItemTemplate="{StaticResource TagChip}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                    </StackPanel>
+                </DataTemplate>
+                <DataTemplate DataType="{x:Type m:RandomPoolSlot}">
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                        <Setter Property="Opacity" Value="0.45"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <StackPanel.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="이 슬롯을 풀 라이브러리에 저장" Click="SaveSlotToPool_Click"/>
+                            </ContextMenu>
+                        </StackPanel.ContextMenu>
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox IsChecked="{Binding IsEnabled}" VerticalAlignment="Center" Margin="0,0,4,0"
+                                      Checked="SlotEnabled_Changed" Unchecked="SlotEnabled_Changed"
+                                      ToolTip="끄면 이 슬롯을 지우지 않고도 생성에서 제외합니다."/>
+                            <TextBlock Text="[랜덤] " FontWeight="Bold" Foreground="#1565C0"/>
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SlotLabelEditor}"/>
+                            <TextBlock Text="  이 중에서 매 줄 "/>
+                            <TextBox Text="{Binding MinCount}" Width="30"/>
+                            <TextBlock Text=" ~ "/>
+                            <TextBox Text="{Binding MaxCount}" Width="30"/>
+                            <TextBlock Text=" 개 무작위"/>
+                        </StackPanel>
+                        <!-- 풀 라이브러리에 저장해둔 풀을 이 슬롯의 후보로 불러오기. 직접 태그(Tags)와
+                             여기서 고른 풀의 후보를 합쳐서 쓴다(둘 다 있어도 서로 안 밀어냄). -->
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                            <TextBlock Text="풀: " VerticalAlignment="Center"/>
+                            <ComboBox Width="160"
+                                      ItemsSource="{Binding DataContext.Pools, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                      DisplayMemberPath="Name" SelectedValuePath="Id"
+                                      SelectedValue="{Binding PoolId, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                      SelectionChanged="PoolCombo_SelectionChanged"/>
+                            <Button Content="해제" Margin="4,0,0,0" Click="ClearPool_Click"
+                                    Visibility="{Binding PoolId, Converter={StaticResource NonEmptyToVis}}"/>
+                        </StackPanel>
+                        <!-- 풀 체이닝: 이 슬롯에 풀을 더 추가하면 전부 하나의 후보군으로 합쳐져서
+                             매 줄 그중 하나만 뽑힌다(풀마다 슬롯을 따로 두면 "체위 두 개가 한 줄에
+                             동시에 나온다" 같은 모순이 생길 수 있어, 반드시 이렇게 합쳐야 한다). -->
+                        <StackPanel Orientation="Horizontal" Margin="0,2,0,0"
+                                    Visibility="{Binding PoolId, Converter={StaticResource NonEmptyToVis}}">
+                            <TextBlock Text="+체이닝: " VerticalAlignment="Center" FontSize="11" Foreground="Gray"
+                                       ToolTip="이 슬롯에 풀을 더 추가해서 하나의 후보군으로 합칩니다(그중 하나만 뽑힘)."/>
+                            <ComboBox Width="160"
+                                      ItemsSource="{Binding DataContext.Pools, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                      DisplayMemberPath="Name" SelectedValuePath="Id"
+                                      SelectionChanged="AddExtraPool_SelectionChanged"/>
+                        </StackPanel>
+                        <!-- 체이닝된 풀 칩: 클릭하면 체이닝 해제(원래 풀 자체는 안 지워짐) -->
+                        <ItemsControl ItemsSource="{Binding ExtraPoolIds}" Margin="0,2,0,0">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Button Margin="0,0,4,2" Padding="4,0" Click="ExtraPoolChip_Click" Tag="{Binding}"
+                                            ToolTip="클릭하여 이 풀의 체이닝 해제">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock>
+                                                <TextBlock.Text>
+                                                    <MultiBinding Converter="{StaticResource PoolIdToName}">
+                                                        <Binding/>
+                                                        <Binding Path="DataContext.Pools" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                                                    </MultiBinding>
+                                                </TextBlock.Text>
+                                            </TextBlock>
+                                            <TextBlock Text="  ✕" Foreground="Gray"/>
+                                        </StackPanel>
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <!-- 선택한 풀(들) 안에 뭐가 들었는지 여기서 바로 확인(수정은 풀 라이브러리에서만) —
+                             예전엔 이걸 보려면 풀 라이브러리 창을 따로 열어야 했다. -->
+                        <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="#78909C" FontSize="11"
+                                   Visibility="{Binding PoolId, Converter={StaticResource NonEmptyToVis}}">
+                            <TextBlock.Text>
+                                <MultiBinding Converter="{StaticResource PoolCandidatesText}">
+                                    <Binding Path="PoolId"/>
+                                    <Binding Path="ExtraPoolIds"/>
+                                    <Binding Path="DataContext.Pools" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                        <!-- 후보 태그들: 이 슬롯을 선택하고 왼쪽에서 더블클릭하면 여기 쌓임 -->
+                        <ItemsControl ItemsSource="{Binding Tags}" Margin="0,2,0,0" ItemTemplate="{StaticResource TagChip}">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                        </ItemsControl>
+                        <TextBlock Text="(이 슬롯을 선택한 뒤 왼쪽에서 태그를 더블클릭해 후보를 넣거나, 위에서 저장된 풀을 고르세요)"
+                                   Foreground="Gray" FontSize="10">
+                            <TextBlock.Visibility>
+                                <MultiBinding Converter="{StaticResource AllEmptyToVis}">
+                                    <Binding Path="Tags.Count"/>
+                                    <Binding Path="PoolId"/>
+                                </MultiBinding>
+                            </TextBlock.Visibility>
+                        </TextBlock>
+                    </StackPanel>
+                </DataTemplate>
+                <!-- 대안 그룹 안의 태그 칩: 공용 TagChip과 달리 '슬롯'이 아니라 '그룹' 컬렉션에서
+                     지워야 해서 전용 클릭 핸들러를 쓴다. -->
+                <DataTemplate x:Key="AlternativeTagChip">
+                    <Button Margin="0,0,4,2" Padding="4,0" Click="AlternativeTagChip_Click" Tag="{Binding}"
+                            ToolTipService.InitialShowDelay="100" ToolTipService.ShowDuration="30000">
+                        <Button.ToolTip>
+                            <MultiBinding Converter="{StaticResource TagTooltip}">
+                                <Binding/>
+                                <Binding Path="DataContext.TagInfo" RelativeSource="{RelativeSource AncestorType=UserControl}"/>
+                            </MultiBinding>
+                        </Button.ToolTip>
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="{Binding Converter={StaticResource UnderToSpace}}"/>
+                            <TextBlock Text="  ✕" Foreground="Gray"/>
+                        </StackPanel>
+                    </Button>
+                </DataTemplate>
+                <!-- 대안 슬롯: "방법 A vs 방법 B"처럼 매 줄 그룹 하나만 통째로 뽑힌다.
+                     그룹마다 라벨(가독용) + 태그 칩 + 태그 추가칸 + 그룹 삭제 버튼. -->
+                <DataTemplate DataType="{x:Type m:AlternativeSlot}">
+                    <StackPanel>
+                        <StackPanel.Style>
+                            <Style TargetType="StackPanel">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsEnabled}" Value="False">
+                                        <Setter Property="Opacity" Value="0.45"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </StackPanel.Style>
+                        <StackPanel.ContextMenu>
+                            <ContextMenu>
+                                <MenuItem Header="이 슬롯을 풀 라이브러리에 저장" Click="SaveSlotToPool_Click"/>
+                            </ContextMenu>
+                        </StackPanel.ContextMenu>
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox IsChecked="{Binding IsEnabled}" VerticalAlignment="Center" Margin="0,0,4,0"
+                                      Checked="SlotEnabled_Changed" Unchecked="SlotEnabled_Changed"
+                                      ToolTip="끄면 이 슬롯을 지우지 않고도 생성에서 제외합니다."/>
+                            <TextBlock Text="[대안] " FontWeight="Bold" Foreground="#6A1B9A"/>
+                            <ContentControl Content="{Binding}" ContentTemplate="{StaticResource SlotLabelEditor}"/>
+                            <TextBlock Text="  — 매 줄 그룹 하나만 통째로 뽑힘" Foreground="Gray" FontSize="11" VerticalAlignment="Center"/>
+                            <Button Content="+그룹" Margin="8,0,0,0" Padding="4,0" Click="AddAlternativeGroup_Click"/>
+                        </StackPanel>
+                        <ItemsControl ItemsSource="{Binding Groups}" Margin="18,4,0,0">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border BorderBrush="#CE93D8" BorderThickness="1" CornerRadius="3" Margin="0,0,0,4" Padding="4">
+                                        <StackPanel>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="그룹: " VerticalAlignment="Center" FontSize="11" Foreground="Gray"/>
+                                                <TextBox Text="{Binding Label, UpdateSourceTrigger=PropertyChanged}" Width="140" FontSize="11"/>
+                                                <TextBlock Text="  비중 " VerticalAlignment="Center" FontSize="11" Foreground="Gray"/>
+                                                <TextBox Text="{Binding Weight, UpdateSourceTrigger=PropertyChanged}" Width="34" FontSize="11"
+                                                         ToolTip="이 그룹이 뽑힐 상대 비중(기본 1). 2면 비중 1인 그룹의 두 배로 자주 나오고, 0이면 뽑히지 않습니다."/>
+                                                <Button Content="그룹 삭제" Margin="8,0,0,0" FontSize="11" Padding="4,0" Click="RemoveAlternativeGroup_Click"/>
+                                            </StackPanel>
+                                            <ItemsControl ItemsSource="{Binding Tags}" Margin="0,2,0,0"
+                                                          ItemTemplate="{StaticResource AlternativeTagChip}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                            </ItemsControl>
+                                            <DockPanel Margin="0,2,0,0">
+                                                <Button DockPanel.Dock="Right" Content="추가" Margin="4,0,0,0" FontSize="11"
+                                                        Click="AddAlternativeGroupTag_Click"/>
+                                                <TextBox Text="{Binding PendingTagInput, UpdateSourceTrigger=PropertyChanged}" FontSize="11"
+                                                         ToolTip="이 그룹에 태그 추가(콤마로 여러 개)"
+                                                         KeyDown="AlternativeGroupInput_KeyDown"/>
+                                            </DockPanel>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
+                </DataTemplate>
+            </ListBox.Resources>
+        </ListBox>
+    </DockPanel>
+</UserControl>

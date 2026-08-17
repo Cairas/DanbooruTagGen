@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DanbooruTagGen.App/DanbooruTagGen.App.csproj" />
+    <Project Path="src/DanbooruTagGen.Core/DanbooruTagGen.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DanbooruTagGen.Tests/DanbooruTagGen.Tests.csproj" />
+  </Folder>
+</Solution>

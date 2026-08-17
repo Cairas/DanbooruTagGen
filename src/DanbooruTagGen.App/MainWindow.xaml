@@ -1,0 +1,44 @@
+<Window x:Class="DanbooruTagGen.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DanbooruTagGen" Height="720" Width="1200">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Row 0: 상단 버튼 바 -->
+        <ToolBarTray Grid.Row="0">
+            <ToolBar>
+                <Button Content="풀 라이브러리" Command="{Binding OpenPoolLibraryCommand}" Margin="4,2"/>
+                <Button Content="레시피 라이브러리" Command="{Binding OpenRecipeLibraryCommand}" Margin="4,2"/>
+                <Button Content="✨ 컨셉 빌더" Command="{Binding OpenConceptWizardCommand}" Margin="4,2"
+                        ToolTip="테마 키워드로 관련 태그를 모아 컨셉 레시피를 자동 조립합니다."/>
+                <Separator/>
+                <Button Content="⟳ 프리셋 갱신" Command="{Binding SyncBundledPresetsCommand}" Margin="4,2"
+                        ToolTip="제공 축 풀·컨셉 팩을 최신 내용으로 갱신합니다. 자작 항목과 삭제 상태는 유지되며, 제공 팩을 직접 수정했다면 덮어써집니다."/>
+                <Button Content="⚡ 퀵 갱신" Command="{Binding QuickSyncBundledPresetsCommand}" Margin="4,2"
+                        ToolTip="확인창·완료 팝업 없이 바로 갱신합니다. 결과는 하단 상태바에만 표시됩니다. 동작은 위 버튼과 동일(덮어쓰기 포함)."/>
+            </ToolBar>
+        </ToolBarTray>
+
+        <!-- Row 1: 3분할 콘텐츠 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="320"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="360"/>
+            </Grid.ColumnDefinitions>
+            <ContentControl Grid.Column="0" Content="{Binding TagSearch}"/>
+            <ContentControl Grid.Column="1" Content="{Binding RecipeBuilder}"/>
+            <ContentControl Grid.Column="2" Content="{Binding Generation}"/>
+        </Grid>
+
+        <!-- Row 2: 상태바 -->
+        <StatusBar Grid.Row="2">
+            <TextBlock Text="{Binding Status}"/>
+        </StatusBar>
+    </Grid>
+</Window>
