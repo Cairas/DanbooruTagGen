@@ -25,6 +25,15 @@ public sealed class AnimaPhraseBook
     public static AnimaPhraseBook Empty { get; } = new(new Dictionary<string, string>());
     public int Count => _phrases.Count;
 
+    /// <summary>이 접두어로 시작하는 "태그"는 Anima 서술문에만 쓰라고 표시된 것이다 — Tags 모드
+    /// 줄에서는 완전히 빠진다. 그림에 대응하는 danbooru 태그가 없는 배경 설정(예: 과거 사건)을
+    /// 굳이 태그 목록에 문자 그대로 끼워 넣고 싶지 않을 때 쓴다. 일반 자연어 문구(공백 포함,
+    /// 접두어 없음)는 기존 그대로 Tags 모드에도 나간다 — SD 텍스트 인코더가 읽을 수 있어서
+    /// 의도적으로 그렇게 설계됐다(guide.md). 이 접두어는 그 경로를 건드리지 않는 별도 옵트인이다.</summary>
+    public const string AnimaOnlyPrefix = "anima-only:";
+
+    public static bool IsAnimaOnly(string tag) => tag.StartsWith(AnimaOnlyPrefix, StringComparison.Ordinal);
+
     /// <summary>CSV 로드. 형식: <c>tag,phrase</c> (헤더 1줄, '#' 주석/빈 줄 무시).
     /// 쉼표가 든 문장을 위해 큰따옴표 감싸기를 지원한다.</summary>
     public static AnimaPhraseBook LoadFromFile(string path)
@@ -71,9 +80,11 @@ public sealed class AnimaPhraseBook
         var kept = parts.Where(p => p.Role != SlotRole.Cosmetic).ToList();
 
         // 자연어 문구는 태그 줄에서 뺀다 — 어차피 뒤 서술문에 그대로 들어가므로 두 번 나가면
-        // 중복이고, 태그 과밀에 민감한 모델에 쓸데없이 길이만 먹인다.
+        // 중복이고, 태그 과밀에 민감한 모델에 쓸데없이 길이만 먹인다. anima-only 표시 태그는
+        // Tags 모드에서도 이미 완전히 빠져 있지만(WildcardGenerator.JoinLine), 여기서도
+        // 방어적으로 걸러 접두어 문자열 자체가 태그 줄에 새지 않게 한다.
         var tagText = string.Join(", ", kept
-            .Where(p => !p.Tag.Contains(' '))
+            .Where(p => !p.Tag.Contains(' ') && !IsAnimaOnly(p.Tag))
             .Select(p => underscoreToSpace ? ToDisplay(p.Tag) : p.Tag));
 
         // 조각은 역할 순으로 모은다 — 누가/무엇을(정체성) → 어떤 상태·어디서(MAJOR) → 표정(MINOR).
@@ -83,6 +94,8 @@ public sealed class AnimaPhraseBook
             foreach (var (tag, r) in kept)
             {
                 if (r != role) continue;
+                // anima-only 태그는 사전에서 실제 문구를 찾는다(접두어 자체는 절대 안 나간다).
+                if (IsAnimaOnly(tag)) { if (TryGet(tag, out var animaPhrase)) AddFragment(fragments, animaPhrase); continue; }
                 // 이미 문장인 것(자연어 문구)은 그대로 쓰고, 태그면 사전을 본다.
                 if (tag.Contains(' ')) { AddFragment(fragments, tag); continue; }
                 if (TryGet(tag, out var phrase)) AddFragment(fragments, phrase);

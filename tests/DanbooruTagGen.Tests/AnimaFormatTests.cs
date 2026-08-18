@@ -142,6 +142,39 @@ public class AnimaFormatTests
     }
 
     [Fact]
+    public void AnimaOnlyTagAppearsOnlyInTheSentenceViaDictionary()
+    {
+        // "anima-only:" 접두어 태그는 danbooru에 대응 태그가 없는 배경 설정(과거 사건 등)을
+        // Anima 서술문에만 넣고 싶을 때 쓴다 — 일반 자연어 문구와 달리 접두어 문자열 자체는
+        // 태그 줄에 절대 나가면 안 되고, 사전에서 실제 문구를 찾아야 한다.
+        var parts = new List<(string, SlotRole)>
+        {
+            ("1girl", SlotRole.Identity),
+            ("anima-only:past_termination", SlotRole.Identity),
+        };
+        var line = Book(("1girl", "a young woman"),
+                         ("anima-only:past_termination", "a past she has never told him about"))
+            .Render(parts, underscoreToSpace: false);
+
+        Assert.DoesNotContain("anima-only:", line);
+        Assert.Equal("1girl. A young woman, a past she has never told him about.", line);
+    }
+
+    [Fact]
+    public void AnimaOnlyTagWithNoDictionaryEntryIsSkippedNotLeaked()
+    {
+        var parts = new List<(string, SlotRole)>
+        {
+            ("1girl", SlotRole.Identity),
+            ("anima-only:no_entry", SlotRole.Identity),
+        };
+        var line = Book(("1girl", "a young woman")).Render(parts, underscoreToSpace: false);
+
+        Assert.DoesNotContain("anima-only:", line);
+        Assert.Equal("1girl. A young woman.", line);
+    }
+
+    [Fact]
     public void SymbolOnlyTagKeepsItsUnderscore()
     {
         // @_@(어질어질한 눈)를 "@ @"로 바꾸면 뜻을 잃는다. 글자가 없는 태그는 변환하지 않는다.
@@ -159,6 +192,21 @@ public class AnimaFormatTests
             new GenerationOptions { LineCount = 1, UnderscoreToSpace = false });
 
         Assert.Equal("1girl, on_back", result.Lines[0]);
+    }
+
+    [Fact]
+    public void AnimaOnlyTagIsAbsentFromTagsModeOutput()
+    {
+        // Tags 모드는 danbooru 태그 줄이다 — anima-only 항목은 애초에 danbooru 태그가 아니므로
+        // 접두어째로 통째로 빠져야 한다(일반 자연어 문구는 그대로 나가는 것과 대비된다).
+        var recipe = new Recipe
+        {
+            Slots = { new FixedSlot { Label = "기본", Tags = { "1girl", "anima-only:past_termination" } } },
+        };
+        var result = new WildcardGenerator().Generate(recipe, NoPools(),
+            new GenerationOptions { LineCount = 1, UnderscoreToSpace = false });
+
+        Assert.Equal("1girl", result.Lines[0]);
     }
 
     [Fact]

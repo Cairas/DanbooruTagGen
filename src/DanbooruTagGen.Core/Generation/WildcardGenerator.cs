@@ -209,11 +209,16 @@ public sealed class WildcardGenerator
         }
     }
 
-    /// <summary>태그 목록을 출력 한 줄로 합친다. 출력 시점에만 '_'→공백 변환.</summary>
-    private static string JoinLine(List<string> tags, GenerationOptions options) =>
-        options.UnderscoreToSpace
-            ? string.Join(", ", tags.Select(AnimaPhraseBook.ToDisplay))
-            : string.Join(", ", tags);
+    /// <summary>태그 목록을 출력 한 줄로 합친다. 출력 시점에만 '_'→공백 변환.
+    /// anima-only로 표시된 항목(<see cref="AnimaPhraseBook.IsAnimaOnly"/>)은 Tags 모드 줄에서
+    /// 아예 뺀다 — Anima 서술문 전용이라 danbooru 태그가 아니다.</summary>
+    private static string JoinLine(List<string> tags, GenerationOptions options)
+    {
+        var visible = tags.Where(t => !AnimaPhraseBook.IsAnimaOnly(t));
+        return options.UnderscoreToSpace
+            ? string.Join(", ", visible.Select(AnimaPhraseBook.ToDisplay))
+            : string.Join(", ", visible);
+    }
 
     internal string GenerateLine(
         Recipe recipe,
