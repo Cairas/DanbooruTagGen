@@ -18,4 +18,14 @@ public sealed class Recipe
     /// 창이 목록을 채울 때마다 RecipeLibraryViewModel이 다시 계산해 넣는다.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string ConflictBadge { get; set; } = "";
+
+    /// <summary>MAJOR 축 조합 수가 VarietyAnalyzer.Threshold(200) 미만일 때 표시하는 배지
+    /// ("🔸조합수", ""=충분함). ConflictBadge와 같은 이유로 저장하지 않는 계산값.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string VarietyBadge { get; set; } = "";
+
+    /// <summary>Anima 서술 조각이 없는 태그가 있을 때 표시하는 배지("📝개수", ""=전부 있음).
+    /// ConflictBadge와 같은 이유로 저장하지 않는 계산값.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string AnimaBadge { get; set; } = "";
 }

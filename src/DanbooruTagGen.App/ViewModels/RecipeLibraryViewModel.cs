@@ -125,7 +125,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     {
         _main = main;
         Recipes = new ObservableCollection<Recipe>(main.SavedRecipes);
-        RefreshConflictBadges();
+        RefreshBadges();
         RefreshCategories();
         RefreshFilter();
     }
@@ -195,7 +195,8 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         var search = SearchText.Trim();
         var ordered = Recipes
             .Where(r => string.IsNullOrWhiteSpace(search)
-                || r.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+                || r.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || UsesTag(r, search))
             .Where(r => SelectedCategory == AllCategoriesLabel || r.Category == SelectedCategory)
             .Where(r => !ShowFavoritesOnly || _main.Settings.FavoriteRecipeIds.Contains(r.Id))
             .Select(r => (Recipe: r, IsNsfw: IsNsfwRecipe(r)))
@@ -261,6 +262,29 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         }
     }
 
+    /// <summary>레시피가 이 태그(부분 일치, 대소문자 무시)를 인라인이나 참조 풀 후보로
+    /// 쓰는지 검사한다. 검색창에 이름 대신 태그를 넣어도 걸리게 하려고 RefreshFilter가 쓴다
+    /// — 오늘처럼 "이 태그 쓰는 레시피가 뭐가 있더라"를 grep 없이 앱에서 바로 찾기 위함.</summary>
+    private bool UsesTag(Recipe recipe, string search)
+    {
+        foreach (var slot in recipe.Slots)
+        {
+            IEnumerable<string> tags = slot switch
+            {
+                FixedSlot f => f.Tags,
+                RandomPoolSlot rp => rp.Tags,
+                AlternativeSlot alt => alt.Groups.SelectMany(g => g.Tags),
+                _ => Array.Empty<string>(),
+            };
+            if (tags.Any(t => t.Contains(search, StringComparison.OrdinalIgnoreCase))) return true;
+
+            foreach (var pool in ResolveSlotPools(slot))
+                if (pool.Candidates.Any(t => t.Contains(search, StringComparison.OrdinalIgnoreCase)))
+                    return true;
+        }
+        return false;
+    }
+
     /// <summary>레시피 성인 여부를 이름이 아니라 내용물로 판정한다: 슬롯의 인라인 태그나
     /// 참조하는 풀 후보 중 하나라도 ko-nsfw 출처(IsNsfw)면 성인. 사용자가 만든 레시피에도
     /// 이름 규칙 없이 그대로 통한다.</summary>
@@ -292,12 +316,36 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         return JsonSerializer.Deserialize<Recipe>(json, JsonStore.Options)!;
     }
 
-    /// <summary>Recipes 전체의 모순 배지를 다시 계산한다. 목록이 통째로 바뀔 때(생성자,
-    /// Refresh, 복제/새로 저장)만 부르면 되고, 검색어 입력 같은 필터링에서는 다시 계산할
-    /// 필요 없다 — RefreshFilter는 이미 계산된 값을 그대로 보여주기만 한다.</summary>
-    private void RefreshConflictBadges()
+    /// <summary>Recipes 전체의 검증 배지(모순·시각 다양성·Anima 조각 커버리지)를 다시
+    /// 계산한다. 목록이 통째로 바뀔 때(생성자, Refresh, 복제/새로 저장)만 부르면 되고,
+    /// 검색어 입력 같은 필터링에서는 다시 계산할 필요 없다 — RefreshFilter는 이미 계산된
+    /// 값을 그대로 보여주기만 한다.</summary>
+    private void RefreshBadges()
     {
-        foreach (var r in Recipes) r.ConflictBadge = ComputeConflictBadge(r);
+        var poolsById = _main.Pools.ToDictionary(p => p.Id);
+        foreach (var r in Recipes)
+        {
+            r.ConflictBadge = ComputeConflictBadge(r);
+            r.VarietyBadge = ComputeVarietyBadge(r, poolsById);
+            r.AnimaBadge = ComputeAnimaBadge(r, poolsById);
+        }
+    }
+
+    /// <summary>MAJOR 축 조합 수가 부족하면("이 팩은 매 줄이 비슷해 보인다") 배지를 붙인다.
+    /// tools/visual_variety_scan.py를 포팅한 VarietyAnalyzer 재사용 — 기준(200)도 거기서 가져온다.</summary>
+    private static string ComputeVarietyBadge(Recipe recipe, IReadOnlyDictionary<string, Core.Models.Pool> poolsById)
+    {
+        var major = Core.Generation.VarietyAnalyzer.ComputeMajorCombinations(recipe, poolsById);
+        return major < Core.Generation.VarietyAnalyzer.Threshold ? $"🔸{major}" : "";
+    }
+
+    /// <summary>Anima 서술 조각이 없는 태그가 있으면("Anima 모드로 뽑으면 이 단어들은 문장에서
+    /// 조용히 빠진다") 개수 배지를 붙인다. tools/anima_phrase_scan.py를 포팅한
+    /// AnimaPhraseBook.FindMissingPhrases 재사용.</summary>
+    private string ComputeAnimaBadge(Recipe recipe, IReadOnlyDictionary<string, Core.Models.Pool> poolsById)
+    {
+        var missing = _main.AnimaPhrases.FindMissingPhrases(recipe, poolsById);
+        return missing.Count > 0 ? $"📝{missing.Count}" : "";
     }
 
     /// <summary>레시피 하나의 모순 배지 계산. RecipeBuilderViewModel.RefreshConflicts와 같은
@@ -342,7 +390,10 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     {
         var snapshot = Clone(_main.RecipeBuilder.BuildRecipe());
         snapshot.Name = $"레시피 {Recipes.Count + 1}";
+        var poolsById = _main.Pools.ToDictionary(p => p.Id);
         snapshot.ConflictBadge = ComputeConflictBadge(snapshot);
+        snapshot.VarietyBadge = ComputeVarietyBadge(snapshot, poolsById);
+        snapshot.AnimaBadge = ComputeAnimaBadge(snapshot, poolsById);
         Recipes.Add(snapshot);
         RefreshFilter();
         SelectedRecipe = FilteredRecipes.Contains(snapshot) ? snapshot : SelectedRecipe;
@@ -362,7 +413,10 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         var copy = Clone(SelectedRecipe);
         copy.Id = Guid.NewGuid().ToString("N");
         copy.Name = $"{SelectedRecipe.Name} (사본)";
-        copy.ConflictBadge = SelectedRecipe.ConflictBadge; // 슬롯 구성이 동일하니 배지도 동일
+        // 슬롯 구성이 동일하니 배지도 그대로 복사(재계산 불필요).
+        copy.ConflictBadge = SelectedRecipe.ConflictBadge;
+        copy.VarietyBadge = SelectedRecipe.VarietyBadge;
+        copy.AnimaBadge = SelectedRecipe.AnimaBadge;
         var insertAt = Recipes.IndexOf(SelectedRecipe) + 1;
         Recipes.Insert(insertAt, copy);
         RefreshFilter();
@@ -443,7 +497,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         var selectedId = SelectedRecipe?.Id;
         Recipes.Clear();
         foreach (var r in _main.SavedRecipes) Recipes.Add(r);
-        RefreshConflictBadges();
+        RefreshBadges();
         RefreshCategories();
         RefreshFilter();
         if (selectedId != null)

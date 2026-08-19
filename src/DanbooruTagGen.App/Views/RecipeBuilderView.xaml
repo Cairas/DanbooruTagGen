@@ -34,6 +34,18 @@
                 Visibility="{Binding ConflictWarning, Converter={StaticResource NonEmptyToVis}}">
             <TextBlock Text="{Binding ConflictWarning}" Foreground="#795548" TextWrapping="Wrap" FontSize="11"/>
         </Border>
+        <!-- 시각 다양성 경고: MAJOR 축 조합 수가 200 미만이면 표시(tools/visual_variety_scan.py 포팅). -->
+        <Border DockPanel.Dock="Top" Background="#FFF3E0" BorderBrush="#EF6C00" BorderThickness="1"
+                Padding="6" Margin="0,0,0,4"
+                Visibility="{Binding VarietyWarning, Converter={StaticResource NonEmptyToVis}}">
+            <TextBlock Text="{Binding VarietyWarning}" Foreground="#E65100" TextWrapping="Wrap" FontSize="11"/>
+        </Border>
+        <!-- Anima 조각 커버리지 경고: 사전에 없는 태그가 있으면 표시(tools/anima_phrase_scan.py 포팅). -->
+        <Border DockPanel.Dock="Top" Background="#E3F2FD" BorderBrush="#1565C0" BorderThickness="1"
+                Padding="6" Margin="0,0,0,4"
+                Visibility="{Binding AnimaCoverageWarning, Converter={StaticResource NonEmptyToVis}}">
+            <TextBlock Text="{Binding AnimaCoverageWarning}" Foreground="#0D47A1" TextWrapping="Wrap" FontSize="11"/>
+        </Border>
         <ListBox ItemsSource="{Binding Slots}" SelectedItem="{Binding SelectedSlot}"
                  HorizontalContentAlignment="Stretch"
                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"

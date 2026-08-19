@@ -182,6 +182,72 @@ public class AnimaFormatTests
         Assert.Equal("on back", AnimaPhraseBook.ToDisplay("on_back"));
     }
 
+    // ── 조각 누락 스캔(FindMissingPhrases, tools/anima_phrase_scan.py 포팅) ──────────
+
+    [Fact]
+    public void FindMissingPhrasesReportsTagsWithoutAPhrase()
+    {
+        var book = Book(("1girl", "a young woman"), ("on_back", "laid out on her back"));
+        var slots = new List<Slot>
+        {
+            new FixedSlot { Label = "기본", Tags = { "1girl", "mystery_tag" } },
+            new RandomPoolSlot { Label = "체위", MinCount = 1, MaxCount = 1, Tags = { "on_back", "another_mystery" } },
+        };
+
+        var missing = book.FindMissingPhrases(slots, new Dictionary<string, Pool>());
+
+        Assert.Contains("mystery_tag", missing);
+        Assert.Contains("another_mystery", missing);
+        Assert.DoesNotContain("1girl", missing);
+        Assert.DoesNotContain("on_back", missing);
+    }
+
+    [Fact]
+    public void FindMissingPhrasesIgnoresCosmeticSlotsAndNaturalLanguagePhrases()
+    {
+        var book = Book(); // 빈 사전 — 조각이 있는 태그가 하나도 없음
+        var slots = new List<Slot>
+        {
+            new FixedSlot { Label = "기본", Tags = { "taken hostage by a masked intruder" } }, // 공백 포함 → 제외
+            new RandomPoolSlot { Label = "구도", MinCount = 1, MaxCount = 1, Tags = { "from_below" } }, // COSMETIC → 제외
+        };
+
+        var missing = book.FindMissingPhrases(slots, new Dictionary<string, Pool>());
+
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void FindMissingPhrasesSkipsDisabledSlotsAndDedupes()
+    {
+        var book = Book();
+        var slots = new List<Slot>
+        {
+            new FixedSlot { Label = "기본", Tags = { "dup_tag" }, IsEnabled = false },
+            new RandomPoolSlot { Label = "체위", MinCount = 1, MaxCount = 1, Tags = { "dup_tag" } },
+        };
+
+        var missing = book.FindMissingPhrases(slots, new Dictionary<string, Pool>());
+
+        Assert.Single(missing);
+        Assert.Equal("dup_tag", missing[0]);
+    }
+
+    [Fact]
+    public void FindMissingPhrasesResolvesPoolCandidates()
+    {
+        var book = Book();
+        var pools = new Dictionary<string, Pool> { ["p1"] = new Pool { Id = "p1", Candidates = { "pool_tag" } } };
+        var slots = new List<Slot>
+        {
+            new RandomPoolSlot { Label = "체위", MinCount = 1, MaxCount = 1, PoolId = "p1" },
+        };
+
+        var missing = book.FindMissingPhrases(slots, pools);
+
+        Assert.Contains("pool_tag", missing);
+    }
+
     // ── 생성기 통합 ────────────────────────────────────────────
 
     [Fact]

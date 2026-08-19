@@ -17,6 +17,8 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
 
     [ObservableProperty] private Slot? _selectedSlot;
     [ObservableProperty] private string _conflictWarning = "";
+    [ObservableProperty] private string _varietyWarning = "";
+    [ObservableProperty] private string _animaCoverageWarning = "";
     /// <summary>검색 없이 슬롯에 직접 타이핑해 넣는 입력 칸. 태그 DB에 없는 자연어 구문
     /// 조각(예: "a girl standing in neon-lit rain")도 그대로 들어간다.</summary>
     [ObservableProperty] private string _customTagInput = "";
@@ -158,9 +160,12 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     }
 
     /// <summary>현재 레시피가 만들 수 있는 모순을 미리 점검해 경고 문구를 갱신한다.
-    /// 고정 태그끼리는 '항상', 풀 후보까지 포함하면 '가끔' 충돌로 표시.</summary>
+    /// 고정 태그끼리는 '항상', 풀 후보까지 포함하면 '가끔' 충돌로 표시. 시각 다양성·Anima
+    /// 조각 커버리지 경고도 슬롯이 바뀔 때마다 같이 갱신한다(호출 지점이 전부 겹치므로).</summary>
     public void RefreshConflicts()
     {
+        RefreshVarietyAndAnimaWarnings();
+
         var rules = _main.Conflicts;
         if (rules.Count == 0) { ConflictWarning = ""; return; }
 
@@ -211,6 +216,25 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         ConflictWarning = "⚠ 모순 " + string.Join("  /  ", parts);
     }
 
+    /// <summary>MAJOR 축 조합 수(VarietyAnalyzer, tools/visual_variety_scan.py 포팅)와 Anima
+    /// 서술 조각 커버리지(AnimaPhraseBook.FindMissingPhrases, tools/anima_phrase_scan.py 포팅)를
+    /// 지금 만들고 있는(아직 저장 안 된) 슬롯 구성 그대로 다시 계산한다. 저장 후 라이브러리에서
+    /// 확인할 필요 없이 빌더에서 바로 보이게 한다.</summary>
+    private void RefreshVarietyAndAnimaWarnings()
+    {
+        var poolsById = _main.Pools.ToDictionary(p => p.Id);
+
+        var major = Core.Generation.VarietyAnalyzer.ComputeMajorCombinations(Slots, poolsById);
+        VarietyWarning = major < Core.Generation.VarietyAnalyzer.Threshold
+            ? $"🔸 MAJOR 축 조합 수 {major}개 (기준 {Core.Generation.VarietyAnalyzer.Threshold}개 미만 — 매 줄이 비슷해 보일 수 있습니다. 축을 추가하세요.)"
+            : "";
+
+        var missing = _main.AnimaPhrases.FindMissingPhrases(Slots, poolsById);
+        AnimaCoverageWarning = missing.Count > 0
+            ? $"📝 Anima 서술 조각 없음({missing.Count}개): {string.Join(", ", missing.Take(10))}" + (missing.Count > 10 ? " ..." : "")
+            : "";
+    }
+
     /// <summary>태그 검색 결과를 이 빌더의 선택 슬롯으로 보내도록 콜백을 (재)연결.
     /// 풀 라이브러리 창이 콜백을 가져갔다가 닫힌 뒤 소유권을 되돌릴 때도 사용.</summary>
     public void AttachTagSearch() => _main.TagSearch.OnAddTag = AddTagToSelectedSlot;
@@ -257,7 +281,7 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
             {
                 rps.Tags.Add(tag);                      // ObservableCollection → UI 즉시 반영(칩 표시)
                 RefreshConflicts();
-                _main.Status = $"'{tag}' → 랜덤 [{rps.Label}] (후보 {rps.Tags.Count}개 중 무작위)";
+                _main.Status = $"'{tag}' → 랜덤 [{rps.Label}] (후보 {rps.Tags.Count}개 중 무작위)" + LowFrequencySuffix(tag);
             }
             else
             {
@@ -278,7 +302,7 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         {
             target.Tags.Add(tag);                       // ObservableCollection → UI 즉시 반영
             RefreshConflicts();
-            _main.Status = $"'{tag}' 추가됨 → 고정 [{target.Label}]";
+            _main.Status = $"'{tag}' 추가됨 → 고정 [{target.Label}]" + LowFrequencySuffix(tag);
         }
         else
         {
@@ -376,12 +400,33 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         _main.Status = "그룹 삭제됨";
     }
 
-    /// <summary>대안 그룹 하나에 태그를 추가한다(콤마로 여러 개 가능).</summary>
+    /// <summary>대안 그룹 하나에 태그를 추가한다(콤마로 여러 개 가능). Tags 컬렉션 변경은
+    /// 생성자에서 건 구독(SubscribeGroup→OnSlotTagsChanged)이 이미 RefreshConflicts를 자동
+    /// 호출하므로 여기서 따로 부르지 않는다 — 저빈도 경고만 직접 붙인다.</summary>
     public void AddTagsToGroup(AlternativeGroup group, string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return;
+        var lowFreq = "";
         foreach (var piece in input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            if (!group.Tags.Contains(piece)) group.Tags.Add(piece);
+        {
+            if (group.Tags.Contains(piece)) continue;
+            group.Tags.Add(piece);
+            lowFreq += LowFrequencySuffix(piece);
+        }
+        if (lowFreq.Length > 0) _main.Status = $"'{group.Label}'에 태그 추가됨" + lowFreq;
+    }
+
+    /// <summary>태그 빈도가 낮으면(guide.md의 저빈도 경계값 2000건 미만) 상태 표시줄에 덧붙일
+    /// 경고 문구. 태그 DB가 아직 없거나(TagInfo null) 등록 안 된 태그(자연어 문구 등)면 빈 문자열.
+    /// <c>pinwheel</c>·<c>tramp_stamp</c>처럼 이름만 봐서는 함정인 줄 모르는 저빈도 태그를
+    /// 태그를 넣는 순간 바로 알려준다(예전엔 파이썬으로 danbooru.csv를 직접 조회해야 알았다).</summary>
+    private string LowFrequencySuffix(string tag)
+    {
+        const int threshold = 2000;
+        var postCount = TagInfo?.Lookup(tag)?.PostCount;
+        return postCount is > 0 and < threshold
+            ? $" ⚠ 저빈도({postCount:N0}건) — 이 슬롯에 다른 고빈도 태그가 있는지 확인하세요"
+            : "";
     }
 
     [RelayCommand]

@@ -115,6 +115,52 @@ public sealed class AnimaPhraseBook
         if (!acc.Contains(phrase, StringComparer.OrdinalIgnoreCase)) acc.Add(phrase);
     }
 
+    /// <summary><c>tools/anima_phrase_scan.py</c>의 판정 규칙을 그대로 포팅: 비활성 슬롯과
+    /// COSMETIC 축은 건너뛰고(Anima 모드에서 애초에 버려지는 태그라 조각이 필요 없음),
+    /// 공백이 든 태그(자연어 문구 — <c>anima-only:</c> 접두어는 공백이 없으므로 포함됨)는
+    /// 이미 그대로 문장에 들어가므로 사전 조회 대상에서 뺀다. 남은 태그 중 <see cref="TryGet"/>이
+    /// 실패하는 것만 모아 돌려준다(중복 제거).</summary>
+    public IReadOnlyList<string> FindMissingPhrases(IEnumerable<Slot> slots, IReadOnlyDictionary<string, Pool> poolsById)
+    {
+        var missing = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var slot in slots)
+        {
+            if (!slot.IsEnabled) continue;
+            var role = slot is FixedSlot ? SlotRole.Identity : SlotRoleClassifier.Classify(slot);
+            if (role == SlotRole.Cosmetic) continue;
+
+            IEnumerable<string> tags = slot switch
+            {
+                FixedSlot f => f.Tags,
+                RandomPoolSlot r => ResolveRandomPoolTags(r, poolsById),
+                AlternativeSlot alt => alt.Groups.SelectMany(g => g.Tags),
+                _ => Array.Empty<string>(),
+            };
+
+            foreach (var tag in tags)
+            {
+                if (tag.Contains(' ')) continue;   // 자연어 문구는 그대로 문장에 들어간다
+                if (!seen.Add(tag)) continue;
+                if (!TryGet(tag, out _)) missing.Add(tag);
+            }
+        }
+        return missing;
+    }
+
+    public IReadOnlyList<string> FindMissingPhrases(Recipe recipe, IReadOnlyDictionary<string, Pool> poolsById)
+        => FindMissingPhrases(recipe.Slots, poolsById);
+
+    private static IEnumerable<string> ResolveRandomPoolTags(RandomPoolSlot r, IReadOnlyDictionary<string, Pool> poolsById)
+    {
+        foreach (var t in r.Tags) yield return t;
+        if (!string.IsNullOrEmpty(r.PoolId) && poolsById.TryGetValue(r.PoolId, out var pool))
+            foreach (var t in pool.Candidates) yield return t;
+        foreach (var extraId in r.ExtraPoolIds)
+            if (poolsById.TryGetValue(extraId, out var extraPool))
+                foreach (var t in extraPool.Candidates) yield return t;
+    }
+
     /// <summary>출력용 표기. '_'를 공백으로 바꾸되 <c>@_@</c>처럼 **글자가 없는 기호 태그**는
     /// 건드리지 않는다 — 바꾸면 "@ @"가 되어 원래 뜻(어질어질한 눈)을 잃는다.</summary>
     internal static string ToDisplay(string tag) =>

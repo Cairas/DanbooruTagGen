@@ -1,3 +1,4 @@
+using System.IO;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -86,6 +87,57 @@ public sealed partial class MainViewModel : ObservableObject
 
         IsLoading = false;
         Status = $"태그 {db.Count:N0}개 로드됨";
+
+        StartPresetWatcher();
+    }
+
+    private FileSystemWatcher? _presetWatcher;
+    private System.Windows.Threading.DispatcherTimer? _presetSyncDebounce;
+
+    /// <summary>data/presets(번들 축 풀·컨셉 팩)의 변경을 감지해 QuickSyncBundledPresets를
+    /// 자동으로 부른다. 예전엔 JSON을 스크립트로 고칠 때마다 "⟳ 프리셋 갱신"을 손으로
+    /// 눌러야 했다 — 이 병합 로직(PresetSeeder) 자체는 사용자 자작 항목을 보존하는 안전장치가
+    /// 이미 있으므로 그대로 재사용하고, 트리거만 자동화한다. data/presets/pools.json과
+    /// data/presets/recipes/*.json이 같은 상위 폴더 아래 있어 감시자 하나(하위 폴더 포함)로 충분하다.
+    /// 짧은 시간 안에 여러 파일이 연달아 바뀌어도(레시피 스크립트가 pools.json → recipe.json
+    /// 순으로 따로 쓰는 경우 등) 디바운스로 한 번만 동기화한다 — 중간에 여러 번 불려도
+    /// QuickSyncBundledPresets 자체가 멱등이라 해롭지 않다.</summary>
+    private void StartPresetWatcher()
+    {
+        var dir = Path.GetDirectoryName(AppPaths.PresetPoolsFile);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+
+        _presetSyncDebounce = new System.Windows.Threading.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMilliseconds(400),
+        };
+        _presetSyncDebounce.Tick += (_, _) =>
+        {
+            _presetSyncDebounce!.Stop();
+            QuickSyncBundledPresets();
+        };
+
+        void OnChanged(object sender, FileSystemEventArgs e)
+        {
+            // Changed/Created/Deleted/Renamed는 파일 워처 스레드에서 오므로 DispatcherTimer를
+            // 건드리기 전에 UI 스레드로 넘긴다.
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                _presetSyncDebounce!.Stop();
+                _presetSyncDebounce.Start();
+            });
+        }
+
+        _presetWatcher = new FileSystemWatcher(dir, "*.json")
+        {
+            IncludeSubdirectories = true,
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+        };
+        _presetWatcher.Changed += OnChanged;
+        _presetWatcher.Created += OnChanged;
+        _presetWatcher.Deleted += OnChanged;
+        _presetWatcher.Renamed += OnChanged;
+        _presetWatcher.EnableRaisingEvents = true;
     }
 
     public void SavePools() => PoolStore.Save(Pools, AppPaths.PoolsFile);
