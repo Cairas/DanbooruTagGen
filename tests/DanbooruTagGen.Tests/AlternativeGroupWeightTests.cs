@@ -79,6 +79,42 @@ public class AlternativeGroupWeightTests
     }
 
     [Fact]
+    public void EqualWeightAltAvoidsLongConsecutiveRepeatsOverManyLines()
+    {
+        // 2026-08-26: "장면 도입"처럼 옵션이 2~3개뿐이고 전부 가중치가 같은 ALT는 순수 랜덤이면
+        // 같은 문장이 여러 줄 연달아 나와 "다 똑같다"는 인상을 준다. 반복 회피 로직이 붙었으니
+        // 200줄 안에서 같은 그룹이 3번 이상 연달아 나오면 안 된다(순수 랜덤이면 이 정도 런은
+        // 흔하다 — 이 로직이 없으면 이 테스트는 실패해야 정상).
+        var recipe = TwoGroups(1, 1);
+        var gen = new WildcardGenerator();
+        var result = gen.Generate(recipe, NoPools(),
+            new GenerationOptions { LineCount = 200, UnderscoreToSpace = false, AvoidDuplicateLines = false, Seed = 12345 });
+
+        int longestRun = 1, currentRun = 1;
+        for (int i = 1; i < result.Lines.Count; i++)
+        {
+            currentRun = result.Lines[i] == result.Lines[i - 1] ? currentRun + 1 : 1;
+            longestRun = Math.Max(longestRun, currentRun);
+        }
+        Assert.True(longestRun <= 3, $"longest consecutive repeat run was {longestRun}, expected <= 3");
+    }
+
+    [Fact]
+    public void SkewedWeightAltStillMatchesRatioWithAvoidRepeatActive()
+    {
+        // 반복 회피가 가중치 편중을 무너뜨리면 안 된다(4:1 비중인데 회피 로직 탓에 80%가
+        // 나와야 할 쪽이 57%로 주저앉는 회귀가 실제로 있었다). Generate()는 항상 lastPicked를
+        // 넘기므로, 이 테스트가 그 경로에서도 비중이 안 깨지는지 확인한다.
+        var recipe = TwoGroups(4, 1);
+        var gen = new WildcardGenerator();
+        var result = gen.Generate(recipe, NoPools(),
+            new GenerationOptions { LineCount = 2000, UnderscoreToSpace = false, AvoidDuplicateLines = false, Seed = 999 });
+
+        int a = result.Lines.Count(l => l == "a");
+        Assert.InRange(a / (double)result.Lines.Count, 0.75, 0.85);
+    }
+
+    [Fact]
     public void AllZeroWeightsThrows()
     {
         var recipe = TwoGroups(0, 0);

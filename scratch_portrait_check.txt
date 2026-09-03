@@ -1,0 +1,15 @@
+=== n365 🔞 정면 상반신 (얼굴 포함)
+  fixed 기본 -> ['1girl', 'solo', 'nude', 'upper_body', 'looking_at_viewer', 'facing_viewer']
+  randomPool 표정 -> ['smile', 'seductive_smile', 'parted_lips', 'closed_mouth']
+  randomPool 조명 -> []
+  randomPool 촬영 효과 -> []
+  randomPool 가슴 크기 -> []
+  randomPool 몸매 -> []
+  randomPool 신체 특징 -> []
+  randomPool 가슴·유두 디테일 -> []
+=== n368 정면 상반신 SFW (얼굴 포함)
+  fixed 기본 -> ['1girl', 'solo', 'upper_body', 'looking_at_viewer', 'facing_viewer']
+  randomPool 표정 -> ['smile', 'parted_lips', 'closed_mouth']
+  randomPool 조명 -> []
+  randomPool 촬영 효과 -> []
+  randomPool 신체 특징 -> []

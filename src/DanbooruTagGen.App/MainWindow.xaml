@@ -1,6 +1,7 @@
 <Window x:Class="DanbooruTagGen.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:views="clr-namespace:DanbooruTagGen.App.Views"
         Title="DanbooruTagGen" Height="720" Width="1200">
     <Grid>
         <Grid.RowDefinitions>
@@ -32,7 +33,24 @@
                 <ColumnDefinition Width="360"/>
             </Grid.ColumnDefinitions>
             <ContentControl Grid.Column="0" Content="{Binding TagSearch}"/>
-            <ContentControl Grid.Column="1" Content="{Binding RecipeBuilder}"/>
+            <!-- 중앙 컬럼: 평소엔 레시피 빌더, "여러 레시피 일괄 생성" 모드에선 그 대신 배치
+                 체크리스트(BatchRecipeListView)가 큰 화면을 차지한다 — 일괄 생성 중엔 빌더를
+                 안 쓰므로 그 공간을 체크리스트에 내준다. 우측(설정·미리보기·생성 결과)은 그대로. -->
+            <Grid Grid.Column="1">
+                <ContentControl Content="{Binding RecipeBuilder}">
+                    <ContentControl.Style>
+                        <Style TargetType="ContentControl">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Generation.IsMultiRecipeMode}" Value="True">
+                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </ContentControl.Style>
+                </ContentControl>
+                <views:BatchRecipeListView DataContext="{Binding Generation}"
+                                            Visibility="{Binding IsMultiRecipeMode, Converter={StaticResource BoolToVis}}"/>
+            </Grid>
             <ContentControl Grid.Column="2" Content="{Binding Generation}"/>
         </Grid>
 

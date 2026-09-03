@@ -12,13 +12,47 @@ namespace DanbooruTagGen.App.ViewModels;
 /// <summary>여러 레시피 일괄 생성 모드에서 체크할 수 있는 레시피 한 항목.</summary>
 public sealed partial class SelectableRecipeItem : ObservableObject
 {
-    public SelectableRecipeItem(Recipe recipe) => Recipe = recipe;
+    public SelectableRecipeItem(Recipe recipe)
+    {
+        Recipe = recipe;
+        SearchBlob = BuildSearchBlob(recipe);
+    }
     public Recipe Recipe { get; }
     public string Name => Recipe.Name;
     /// <summary>NSFW 레시피는 이름이 🔞로 시작한다(전 팩이 지키는 규칙). 카테고리 문자열은
     /// "감금·강제·논콘"/"최대강도"처럼 제각각이라 판정 기준으로 쓰기 어렵다.</summary>
     public bool IsNsfw => Recipe.Name.StartsWith("🔞", StringComparison.Ordinal);
+    /// <summary>"프리뷰" 라벨이 붙은 포즈 레퍼런스 샷(전신 누드 스탠딩 등)인지. "🔞 전체"/
+    /// "SFW 전체" 일괄 선택 버튼 둘 다에서 제외하는 용도 — 매번 수동으로 체크 해제해야
+    /// 하는 게 번거롭다는 피드백으로 추가했다. SFW로 잘못 편입되면 안 되므로 IsNsfw 자체를
+    /// 바꾸지 않고 별도 플래그로 뺐다.</summary>
+    public bool IsPreview => Recipe.Labels.Contains("프리뷰");
     [ObservableProperty] private bool _isChecked;
+
+    /// <summary>이름 + Labels + 모든 슬롯/그룹 라벨 + 모든 danbooru 태그를 한 문자열로 모은
+    /// 검색용 블롭. "netorare"/"네토라레"를 검색창에 치면 사용자가 따로 라벨을 안 붙였어도
+    /// 레시피에 실제로 들어있는 태그나 축 이름(둘 다 컨셉 작업 중 항상 채워짐)으로 찾힌다 —
+    /// Labels는 태그·축 이름만으론 못 잡는 서사적 분류(예: "타락")를 보완하는 용도로만 쓴다.</summary>
+    public string SearchBlob { get; }
+
+    private static string BuildSearchBlob(Recipe recipe)
+    {
+        var parts = new List<string> { recipe.Name };
+        parts.AddRange(recipe.Labels);
+        foreach (var slot in recipe.Slots)
+        {
+            parts.Add(slot.Label);
+            switch (slot)
+            {
+                case FixedSlot f: parts.AddRange(f.Tags); break;
+                case RandomPoolSlot p: parts.AddRange(p.Tags); break;
+                case AlternativeSlot a:
+                    foreach (var g in a.Groups) { parts.Add(g.Label); parts.AddRange(g.Tags); }
+                    break;
+            }
+        }
+        return string.Join('␟', parts);
+    }
 }
 
 public sealed partial class GenerationViewModel : ObservableObject
@@ -32,6 +66,8 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// 다시 골라 채우므로, 검색으로 가렸다 다시 보여도 체크 상태가 유지된다.</summary>
     public ObservableCollection<SelectableRecipeItem> BatchItems { get; } = new();
     private readonly List<SelectableRecipeItem> _allBatchItems = new();
+    /// <summary>이름뿐 아니라 태그·축 라벨·Labels까지 훑는다(SelectableRecipeItem.SearchBlob) —
+    /// "netorare"/"네토라레"처럼 컨셉과 관련된 말을 치면 그 태그나 축 이름을 가진 레시피가 걸린다.</summary>
     [ObservableProperty] private string _batchSearchText = "";
 
     [ObservableProperty] private int _lineCount = 100;
@@ -48,10 +84,10 @@ public sealed partial class GenerationViewModel : ObservableObject
     [ObservableProperty] private bool _weightedSampling;
     /// <summary>표준 프롬프트 순서로 자동 정렬. 기본 꺼짐.</summary>
     [ObservableProperty] private bool _autoOrderTags;
-    /// <summary>Anima 출력 모드. 이 모델은 Qwen LLM을 인코더로 써서 자연어를 잘 읽는 대신
-    /// 태그 과밀에 민감하다 — 구도·조명 같은 장식 축을 빼고 영어 서술문을 덧붙인다.
-    /// 기본 꺼짐(Illustrious 계열용 태그 나열 그대로).</summary>
-    [ObservableProperty] private bool _animaFormat;
+    /// <summary>켜면 QualityTagsText를 매 줄 맨 앞에 붙인다. 자기만의 품질 태그 워크플로가
+    /// 없는 사용자도 이 프로그램만으로 완성된 프롬프트를 바로 뽑을 수 있게 하는 옵트인 기능.</summary>
+    [ObservableProperty] private bool _qualityTagsEnabled;
+    [ObservableProperty] private string _qualityTagsText = "";
     [ObservableProperty] private WriteMode _mode = WriteMode.Append;
     [ObservableProperty] private string _outputPath = "";
     [ObservableProperty] private string _previewText = "";
@@ -69,8 +105,8 @@ public sealed partial class GenerationViewModel : ObservableObject
 
     partial void OnBatchSearchTextChanged(string value) => RefreshBatchItems();
 
-    /// <summary>레시피 라이브러리가 바깥에서 바뀐 뒤(예: 번들 프리셋 갱신) 체크 목록을
-    /// 다시 채운다. 이미 체크해 둔 레시피는 Id로 찾아 체크 상태를 그대로 옮긴다.</summary>
+    /// <summary>레시피 라이브러리가 바깥에서 바뀐 뒤(예: 번들 프리셋 갱신, 라벨 편집) 체크
+    /// 목록을 다시 채운다. 이미 체크해 둔 레시피는 Id로 찾아 체크 상태를 그대로 옮긴다.</summary>
     public void RefreshBatchRecipes()
     {
         var checkedIds = _allBatchItems.Where(b => b.IsChecked).Select(b => b.Recipe.Id).ToHashSet();
@@ -95,14 +131,15 @@ public sealed partial class GenerationViewModel : ObservableObject
         RefreshBatchItems();
     }
 
-    /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. _allBatchItems가 마스터라
-    /// 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
+    /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
+    /// 축 라벨·Labels)까지 훑으므로 "netorare" 같은 실제 태그명으로도 걸린다. _allBatchItems가
+    /// 마스터라 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
     private void RefreshBatchItems()
     {
         BatchItems.Clear();
         var search = BatchSearchText.Trim();
         foreach (var item in _allBatchItems)
-            if (string.IsNullOrWhiteSpace(search) || item.Name.Contains(search, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(search) || item.SearchBlob.Contains(search, StringComparison.OrdinalIgnoreCase))
                 BatchItems.Add(item);
     }
 
@@ -131,7 +168,8 @@ public sealed partial class GenerationViewModel : ObservableObject
 
     private void SelectByRating(bool nsfw)
     {
-        foreach (var item in BatchItems) item.IsChecked = item.IsNsfw == nsfw;
+        foreach (var item in BatchItems)
+            item.IsChecked = !item.IsPreview && item.IsNsfw == nsfw;
     }
 
     /// <summary>재시작해도 생성 탭 설정(출력 경로, 줄 수, 체크박스들)이 남아있도록 저장해둔 값을 복원.
@@ -149,7 +187,8 @@ public sealed partial class GenerationViewModel : ObservableObject
         UnderscoreToSpace = s.UnderscoreToSpace;
         WeightedSampling = s.WeightedSampling;
         AutoOrderTags = s.AutoOrderTags;
-        AnimaFormat = s.AnimaFormat;
+        QualityTagsEnabled = s.QualityTagsEnabled;
+        QualityTagsText = s.QualityTagsText;
     }
 
     /// <summary>현재 생성 탭 설정을 Settings에 담아 디스크에 저장한다.
@@ -167,7 +206,8 @@ public sealed partial class GenerationViewModel : ObservableObject
         s.UnderscoreToSpace = UnderscoreToSpace;
         s.WeightedSampling = WeightedSampling;
         s.AutoOrderTags = AutoOrderTags;
-        s.AnimaFormat = AnimaFormat;
+        s.QualityTagsEnabled = QualityTagsEnabled;
+        s.QualityTagsText = QualityTagsText;
         SettingsStore.Save(s);
     }
 
@@ -182,7 +222,6 @@ public sealed partial class GenerationViewModel : ObservableObject
         UnderscoreToSpace = UnderscoreToSpace,
         Sampling = WeightedSampling ? SamplingMode.Weighted : SamplingMode.Uniform,
         AutoOrderTags = AutoOrderTags,
-        Format = AnimaFormat ? PromptFormat.Anima : PromptFormat.Tags,
     };
 
     /// <summary>이번 호출에 실제로 쓰인 시드. 자동(랜덤) 시드일 때도 결과에 남겨 사용자가
@@ -199,7 +238,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         // null을 넘기면 내부에서 알아서 뽑긴 하지만 그 값을 밖에서 확인할 방법이 없어진다.
         _lastSeedUsed = opts.Seed ?? Random.Shared.Next();
         opts.Seed = _lastSeedUsed;
-        return _generator.Generate(recipe, pools, opts, _main.Conflicts, _main.TagInfo, _main.AnimaPhrases);
+        return _generator.Generate(recipe, pools, opts, _main.Conflicts, _main.TagInfo);
     }
 
     /// <summary>체크된 레시피마다 lineCountEach줄씩 순서대로 뽑아 하나로 잇는다(레시피별로
@@ -221,12 +260,22 @@ public sealed partial class GenerationViewModel : ObservableObject
             var opts = BuildOptions();
             opts.LineCount = lineCountEach;
             opts.Seed = _lastSeedUsed + i;
-            var result = _generator.Generate(checkedItems[i].Recipe, pools, opts, _main.Conflicts, _main.TagInfo, _main.AnimaPhrases);
+            var result = _generator.Generate(checkedItems[i].Recipe, pools, opts, _main.Conflicts, _main.TagInfo);
             foreach (var c in result.Conflicts) conflicts.Add(c with { LineIndex = c.LineIndex + lines.Count });
             lines.AddRange(result.Lines);
             foreach (var w in result.Warnings) warnings.Add($"[{checkedItems[i].Recipe.Name}] {w}");
         }
         return new GenerationResult(lines, warnings) { Conflicts = conflicts };
+    }
+
+    /// <summary>QualityTagsEnabled가 켜져 있으면 QualityTagsText를 매 줄 맨 앞에 붙인다.
+    /// 줄 수·모순 인덱스는 그대로 두고 텍스트만 바꾸므로 Conflicts의 LineIndex는 영향받지 않는다.</summary>
+    private GenerationResult ApplyQualityTags(GenerationResult result)
+    {
+        if (!QualityTagsEnabled || string.IsNullOrWhiteSpace(QualityTagsText)) return result;
+        var prefix = QualityTagsText.Trim();
+        var prefixed = result.Lines.Select(l => string.IsNullOrEmpty(l) ? l : $"{prefix}, {l}").ToList();
+        return result with { Lines = prefixed };
     }
 
     /// <summary>결과의 모순 줄들을 사람이 읽을 요약으로. 없으면 빈 문자열.</summary>
@@ -271,7 +320,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = IsMultiRecipeMode ? RunMulti(Math.Min(20, LineCount)) : Run(Math.Min(20, LineCount));
+            var result = ApplyQualityTags(IsMultiRecipeMode ? RunMulti(Math.Min(20, LineCount)) : Run(Math.Min(20, LineCount)));
             PreviewText = string.Join("\n", result.Lines);
             ConflictReport = BuildConflictReport(result);
             var seedNote = $"(시드 {_lastSeedUsed})";
@@ -287,7 +336,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = IsMultiRecipeMode ? RunMulti(LineCount) : Run(LineCount);
+            var result = ApplyQualityTags(IsMultiRecipeMode ? RunMulti(LineCount) : Run(LineCount));
             WildcardWriter.Write(OutputPath, result.Lines, Mode, InsertBlankLine);
             _main.Settings.LastOutputDir = Path.GetDirectoryName(OutputPath) ?? "";
             SaveSettings();

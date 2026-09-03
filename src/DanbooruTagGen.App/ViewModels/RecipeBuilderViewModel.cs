@@ -18,10 +18,14 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     [ObservableProperty] private Slot? _selectedSlot;
     [ObservableProperty] private string _conflictWarning = "";
     [ObservableProperty] private string _varietyWarning = "";
-    [ObservableProperty] private string _animaCoverageWarning = "";
     /// <summary>검색 없이 슬롯에 직접 타이핑해 넣는 입력 칸. 태그 DB에 없는 자연어 구문
     /// 조각(예: "a girl standing in neon-lit rain")도 그대로 들어간다.</summary>
     [ObservableProperty] private string _customTagInput = "";
+    /// <summary>현재 빌더에 불러온 레시피의 Id(있으면). "불러오기"로 채워지고, 슬롯을 손으로
+    /// 새로 구성하기 시작해도 따로 지우진 않는다 — 그 상태에서 번들 프리셋을 갱신했을 때
+    /// "지금 편집 중인 게 방금 갱신된 그 레시피"임을 알아야 자동으로 다시 불러올 수 있다
+    /// (2026-08-26: 퀵갱신을 눌러도 이미 빌더에 열어 둔 내용은 안 바뀌던 문제의 원인).</summary>
+    public string? LoadedRecipeId { get; private set; }
     public ObservableCollection<Slot> Slots { get; } = new();
     public IReadOnlyList<Pool> Pools => _main.Pools;
     /// <summary>태그 칩 호버 툴팁이 설명/카테고리/빈도를 조회하는 데 쓴다.</summary>
@@ -135,8 +139,7 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     }
 
     /// <summary>직접 입력 칸의 내용을 선택 슬롯에 넣는다. 콤마로 여러 개를 한 번에 넣을 수 있고,
-    /// DB에 없는 문자열(자연어 조각)도 허용한다 — 생성기는 태그 존재 여부를 강제하지 않으므로
-    /// anima 같은 자연어 계열 모델용 하이브리드 프롬프트를 만들 때 쓴다.</summary>
+    /// DB에 없는 문자열도 허용한다 — 생성기는 태그 존재 여부를 강제하지 않는다.</summary>
     [RelayCommand]
     private void AddCustomTag()
     {
@@ -160,11 +163,11 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     }
 
     /// <summary>현재 레시피가 만들 수 있는 모순을 미리 점검해 경고 문구를 갱신한다.
-    /// 고정 태그끼리는 '항상', 풀 후보까지 포함하면 '가끔' 충돌로 표시. 시각 다양성·Anima
-    /// 조각 커버리지 경고도 슬롯이 바뀔 때마다 같이 갱신한다(호출 지점이 전부 겹치므로).</summary>
+    /// 고정 태그끼리는 '항상', 풀 후보까지 포함하면 '가끔' 충돌로 표시. 시각 다양성 경고도
+    /// 슬롯이 바뀔 때마다 같이 갱신한다(호출 지점이 전부 겹치므로).</summary>
     public void RefreshConflicts()
     {
-        RefreshVarietyAndAnimaWarnings();
+        RefreshVarietyWarning();
 
         var rules = _main.Conflicts;
         if (rules.Count == 0) { ConflictWarning = ""; return; }
@@ -216,22 +219,16 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         ConflictWarning = "⚠ 모순 " + string.Join("  /  ", parts);
     }
 
-    /// <summary>MAJOR 축 조합 수(VarietyAnalyzer, tools/visual_variety_scan.py 포팅)와 Anima
-    /// 서술 조각 커버리지(AnimaPhraseBook.FindMissingPhrases, tools/anima_phrase_scan.py 포팅)를
-    /// 지금 만들고 있는(아직 저장 안 된) 슬롯 구성 그대로 다시 계산한다. 저장 후 라이브러리에서
+    /// <summary>MAJOR 축 조합 수(VarietyAnalyzer, tools/visual_variety_scan.py 포팅)를 지금
+    /// 만들고 있는(아직 저장 안 된) 슬롯 구성 그대로 다시 계산한다. 저장 후 라이브러리에서
     /// 확인할 필요 없이 빌더에서 바로 보이게 한다.</summary>
-    private void RefreshVarietyAndAnimaWarnings()
+    private void RefreshVarietyWarning()
     {
         var poolsById = _main.Pools.ToDictionary(p => p.Id);
 
         var major = Core.Generation.VarietyAnalyzer.ComputeMajorCombinations(Slots, poolsById);
         VarietyWarning = major < Core.Generation.VarietyAnalyzer.Threshold
             ? $"🔸 MAJOR 축 조합 수 {major}개 (기준 {Core.Generation.VarietyAnalyzer.Threshold}개 미만 — 매 줄이 비슷해 보일 수 있습니다. 축을 추가하세요.)"
-            : "";
-
-        var missing = _main.AnimaPhrases.FindMissingPhrases(Slots, poolsById);
-        AnimaCoverageWarning = missing.Count > 0
-            ? $"📝 Anima 서술 조각 없음({missing.Count}개): {string.Join(", ", missing.Take(10))}" + (missing.Count > 10 ? " ..." : "")
             : "";
     }
 
@@ -269,6 +266,21 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     public void RemoveExtraPool(RandomPoolSlot slot, string poolId) => slot.ExtraPoolIds.Remove(poolId);
 
     public Recipe BuildRecipe() => new() { Name = "Untitled", Slots = Slots.ToList() };
+
+    /// <summary>레시피를 빌더에 통째로 불러온다(현재 슬롯 구성 교체) — 라이브러리의 "불러오기"와
+    /// 퀵갱신 뒤 자동 재적재가 공유하는 경로. JSON 왕복으로 깊은 복사해 원본 Recipe 객체를
+    /// 안 건드린다. <see cref="LoadedRecipeId"/>를 기록해 두면, 이 레시피가 나중에 번들 갱신으로
+    /// 다시 바뀌었을 때 MainViewModel이 이 메서드를 다시 불러 화면을 최신으로 맞출 수 있다.</summary>
+    public void LoadRecipe(Recipe recipe)
+    {
+        var json = JsonSerializer.Serialize(recipe, JsonStore.Options);
+        var copy = JsonSerializer.Deserialize<Recipe>(json, JsonStore.Options)!;
+        Slots.Clear();
+        foreach (var slot in copy.Slots) Slots.Add(slot);
+        SelectedSlot = Slots.FirstOrDefault();
+        LoadedRecipeId = recipe.Id;
+        RefreshConflicts();
+    }
 
     /// <summary>선택된 슬롯 종류에 따라 태그를 그 슬롯의 후보로 넣는다:
     /// 랜덤 슬롯이면 그 슬롯의 후보 목록으로, 그 외에는 고정 슬롯으로.</summary>

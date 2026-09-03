@@ -4,9 +4,9 @@ namespace DanbooruTagGen.Core.Generation;
 
 /// <summary>슬롯이 완성된 그림에서 차지하는 비중.
 /// <para>
-/// 원래는 개발자 도구(<c>tools/visual_variety_scan.py</c>)에만 있던 분류인데, Anima 출력 모드가
-/// "어떤 태그를 남기고 어떤 걸 버릴지" 판단해야 해서 런타임으로 옮겼다. 두 곳의 기준이 갈리면
-/// 지표와 실제 출력이 어긋나므로, 분류표를 바꿀 때는 양쪽을 같이 고쳐야 한다.
+/// <c>tools/visual_variety_scan.py</c>의 AXIS_TIERS를 런타임으로 포팅한 것 — 레시피 빌더의
+/// "MAJOR 축 조합 수" 경고가 이 분류를 그대로 쓴다. 두 곳의 기준이 갈리면 지표와 실제가
+/// 어긋나므로, 분류표를 바꿀 때는 양쪽을 같이 고쳐야 한다.
 /// </para></summary>
 public enum SlotRole
 {
@@ -30,18 +30,20 @@ public static class SlotRoleClassifier
     // (예: "장치 디테일"은 소품이라 MINOR인데, 뒤의 "장치"(MAJOR)보다 먼저 와야 한다).
     private static readonly (string Key, SlotRole Role)[] Table =
     {
+        // 장면 도입 — 서사 문장을 대안(Alternative) 슬롯으로 돌릴 때 쓰는 라벨.
+        // FixedSlot이 아니어도 Identity로 잡는다.
+        ("장면 도입", SlotRole.Identity),
         // 카메라는 COSMETIC이 아니다 — "샷 크기"가 배경이 보일지 말지를 정하므로
-        // Anima 모드에서도 버리면 안 된다. 아래 ("구도"/"framing", Cosmetic)보다 먼저 온다.
+        // 아래 ("구도"/"framing", Cosmetic)보다 먼저 온다.
         ("샷 크기", SlotRole.Minor), ("카메라 각도", SlotRole.Minor), ("shot size", SlotRole.Minor),
 
         // ── COSMETIC: 먼저 걸러내야 MAJOR로 오분류되지 않는다.
         ("가슴·유두", SlotRole.Cosmetic), ("유두", SlotRole.Cosmetic), ("가슴 크기", SlotRole.Cosmetic),
         ("생식기 디테일", SlotRole.Cosmetic), ("구도", SlotRole.Cosmetic), ("framing", SlotRole.Cosmetic),
         ("angle", SlotRole.Cosmetic), ("조명", SlotRole.Cosmetic), ("lighting", SlotRole.Cosmetic),
-        ("시선", SlotRole.Cosmetic), ("gaze", SlotRole.Cosmetic), ("체액", SlotRole.Cosmetic),
-        ("fluid", SlotRole.Cosmetic), ("cum", SlotRole.Cosmetic), ("촬영", SlotRole.Cosmetic),
-        ("환경 디테일", SlotRole.Cosmetic), ("room detail", SlotRole.Cosmetic),
-        ("헤어", SlotRole.Cosmetic), ("hair", SlotRole.Cosmetic), ("몸매", SlotRole.Cosmetic),
+        ("시선", SlotRole.Cosmetic), ("gaze", SlotRole.Cosmetic),
+        ("촬영", SlotRole.Cosmetic),
+        ("기계 부위", SlotRole.Cosmetic),  // 사이보그 팩의 추가 기계 디테일 — 정체성은 고정 슬롯이 이미 담당.
         ("삽입 연출", SlotRole.Cosmetic),
         ("연출", SlotRole.Minor), ("장치 디테일", SlotRole.Minor), ("설비 디테일", SlotRole.Minor),
 
@@ -52,7 +54,7 @@ public static class SlotRoleClassifier
         ("captive use", SlotRole.Major), ("취급받는 방식", SlotRole.Major), ("contact focus", SlotRole.Major),
         ("체위", SlotRole.Major), ("자세", SlotRole.Major), ("pose", SlotRole.Major),
         ("posture", SlotRole.Major), ("position", SlotRole.Major),
-        ("포박", SlotRole.Major), ("구속", SlotRole.Major), ("bondage", SlotRole.Major),
+        ("포박", SlotRole.Major), ("구속", SlotRole.Major), ("결박", SlotRole.Major), ("bondage", SlotRole.Major),
         ("restraint", SlotRole.Major),
         ("산란 후 반응", SlotRole.Minor),   // '산란'(MAJOR)보다 먼저 — 표정 축이지 산란 축이 아니다.
         ("배경", SlotRole.Major), ("background", SlotRole.Major), ("장소", SlotRole.Major),
@@ -60,15 +62,19 @@ public static class SlotRoleClassifier
         ("환경", SlotRole.Major), ("받침", SlotRole.Major),
         ("옷", SlotRole.Major), ("clothing", SlotRole.Major), ("복장", SlotRole.Major),
         ("의상", SlotRole.Major), ("lingerie", SlotRole.Major), ("속옷", SlotRole.Major),
+        ("신발", SlotRole.Major),
         ("도구", SlotRole.Major), ("device", SlotRole.Major), ("tool", SlotRole.Major),
         ("prop", SlotRole.Major), ("장치", SlotRole.Major), ("경과", SlotRole.Major),
         ("몸에 남은", SlotRole.Major), ("시간", SlotRole.Major),
         ("몸 상태", SlotRole.Major), ("몸의 상태", SlotRole.Major), ("body state", SlotRole.Major),
         ("체격", SlotRole.Major), ("임신", SlotRole.Major), ("번식", SlotRole.Major),
-        ("산란", SlotRole.Major), ("결손", SlotRole.Major), ("피어싱", SlotRole.Major),
-        ("타투", SlotRole.Major), ("낙인", SlotRole.Major), ("신체 개조", SlotRole.Major),
+        ("산란", SlotRole.Major), ("결손", SlotRole.Major), ("훼손", SlotRole.Major), ("피어싱", SlotRole.Major),
+        ("타투", SlotRole.Major), ("낙인", SlotRole.Major), ("문신", SlotRole.Major), ("신체 개조", SlotRole.Major),
         ("인원", SlotRole.Major), ("구성", SlotRole.Major), ("손님", SlotRole.Major),
+        ("다른 포로", SlotRole.Major), ("연령대", SlotRole.Major), ("몬스터 종류", SlotRole.Major), ("가해자 형태", SlotRole.Major),
         ("남편", SlotRole.Major), ("야수의 수", SlotRole.Major), ("삽입 방식", SlotRole.Major),
+        // 헤어스타일·체형 — 실제로 그림이 크게 바뀐다(예전엔 과소평가돼 Cosmetic이었음).
+        ("헤어", SlotRole.Major), ("hair", SlotRole.Major), ("몸매", SlotRole.Major),
 
         // ── MINOR
         ("표정", SlotRole.Minor), ("expression", SlotRole.Minor), ("face", SlotRole.Minor),
@@ -76,12 +82,17 @@ public static class SlotRoleClassifier
         ("심리", SlotRole.Minor), ("심경", SlotRole.Minor), ("정신", SlotRole.Minor),
         ("state", SlotRole.Minor), ("상태", SlotRole.Minor), ("행동", SlotRole.Minor),
         ("action", SlotRole.Minor), ("손길", SlotRole.Minor), ("태도", SlotRole.Minor),
+        ("소품", SlotRole.Minor), ("장신구", SlotRole.Minor),
         ("tone", SlotRole.Minor), ("pressure", SlotRole.Minor), ("attitude", SlotRole.Minor),
         ("흔적", SlotRole.Minor), ("trace", SlotRole.Minor), ("상처", SlotRole.Minor),
-        ("폭행", SlotRole.Minor), ("표식", SlotRole.Minor), ("야수의 몸", SlotRole.Minor), ("괴물의 몸", SlotRole.Minor), ("상대의 몸", SlotRole.Minor), ("체형 대비", SlotRole.Minor), ("딸의 머리", SlotRole.Minor),
+        ("폭행", SlotRole.Minor), ("표식", SlotRole.Minor), ("야수의 몸", SlotRole.Minor), ("괴물의 몸", SlotRole.Minor), ("상대의 몸", SlotRole.Minor), ("체형 대비", SlotRole.Minor), ("딸의 머리", SlotRole.Minor), ("동물 종류", SlotRole.Minor),
         ("금단 증상", SlotRole.Minor), ("약의 흔적", SlotRole.Minor),
         ("resistance", SlotRole.Minor), ("무너짐", SlotRole.Minor), ("약이 퍼진", SlotRole.Minor),
         ("기본", SlotRole.Minor), ("basic", SlotRole.Minor),
+        // 체액 — 정액 범벅처럼 화면을 크게 덮는 것도 있어 완전 COSMETIC은 과소평가였다.
+        ("체액", SlotRole.Minor), ("fluid", SlotRole.Minor), ("cum", SlotRole.Minor),
+        // 환경 디테일 — 배경을 뒷받침하는 보조 소품.
+        ("환경 디테일", SlotRole.Minor), ("room detail", SlotRole.Minor),
     };
 
     /// <summary>ALT 그룹들이 서로 다른 "눈에 보이는 것"을 담고 있으면 라벨과 무관하게 MAJOR다.

@@ -10,6 +10,11 @@ public sealed class Recipe
     /// <summary>레시피 라이브러리의 카테고리 필터용 분류(예: "촉수", "구속·BDSM").
     /// 빈 문자열이면 미분류 — 옛 저장 파일에 필드가 없어도 기본값이라 그대로 로드된다.</summary>
     public string Category { get; set; } = "";
+    /// <summary>사용자 정의 자유 라벨(예: "전쟁", "불륜", "네토라레"). danbooru 태그가 아니라
+    /// 컨셉 분류·검색용이며 한 레시피에 여러 개 붙일 수 있다. 이름을 Tags로 짓지 않은 이유는
+    /// RandomPoolSlot.Tags(danbooru 태그)와 헷갈리지 않기 위해서다. 빈 리스트면 라벨 없음 —
+    /// 옛 저장 파일에 필드가 없어도 기본값이라 그대로 로드된다.</summary>
+    public List<string> Labels { get; set; } = new();
     public List<Slot> Slots { get; set; } = new();
     public int DefaultLineCount { get; set; } = 100;
 
@@ -23,9 +28,4 @@ public sealed class Recipe
     /// ("🔸조합수", ""=충분함). ConflictBadge와 같은 이유로 저장하지 않는 계산값.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string VarietyBadge { get; set; } = "";
-
-    /// <summary>Anima 서술 조각이 없는 태그가 있을 때 표시하는 배지("📝개수", ""=전부 있음).
-    /// ConflictBadge와 같은 이유로 저장하지 않는 계산값.</summary>
-    [System.Text.Json.Serialization.JsonIgnore]
-    public string AnimaBadge { get; set; } = "";
 }

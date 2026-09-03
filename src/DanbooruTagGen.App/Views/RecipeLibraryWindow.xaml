@@ -50,10 +50,9 @@
             <Button DockPanel.Dock="Bottom" Content="✓ 선택 항목 일괄 생성으로 보내기" Margin="0,4,0,0"
                     Command="{Binding SendSelectedToBatchCommand}"
                     ToolTip="Ctrl/Shift로 여러 레시피를 선택한 뒤 누르면, 생성 패널의 '여러 레시피 일괄 생성' 체크 목록이 이걸로 교체됩니다."/>
-            <!-- 검증 배지 3종(모두 RecipeLibraryViewModel.RefreshBadges가 미리 계산해 Recipe에 넣어둠):
+            <!-- 검증 배지 2종(모두 RecipeLibraryViewModel.RefreshBadges가 미리 계산해 Recipe에 넣어둠):
                  모순(‼=고정끼리 항상 충돌, ⚠=풀 후보까지 포함하면 충돌 가능),
-                 🔸=MAJOR 축 조합 수가 200 미만(매 줄이 비슷해 보일 위험, tools/visual_variety_scan.py 기준),
-                 📝=Anima 서술 조각이 없는 태그 있음(Anima 모드로 뽑으면 그 단어가 문장에서 조용히 빠짐).
+                 🔸=MAJOR 축 조합 수가 200 미만(매 줄이 비슷해 보일 위험, tools/visual_variety_scan.py 기준).
                  SelectionMode=Extended: Ctrl/Shift로 여러 개 선택 가능 — SelectedItem(단일)은
                  그대로 마지막 포커스 항목을 가리켜 오른쪽 미리보기·불러오기는 기존 그대로 동작한다. -->
             <ListBox x:Name="RecipeListBox" ItemsSource="{Binding FilteredRecipes}" SelectedItem="{Binding SelectedRecipe}"
@@ -66,8 +65,6 @@
                                        Width="16" ToolTip="⚠ 풀 후보까지 포함하면 모순 가능 / ‼ 고정 태그끼리 항상 모순"/>
                             <TextBlock Text="{Binding VarietyBadge}" Foreground="#E65100" FontWeight="Bold"
                                        Width="34" ToolTip="MAJOR 축 조합 수가 200 미만 — 매 줄이 비슷해 보일 수 있습니다"/>
-                            <TextBlock Text="{Binding AnimaBadge}" Foreground="#1565C0" FontWeight="Bold"
-                                       Width="26" ToolTip="Anima 서술 조각이 없는 태그 수 — Anima 모드에서 문장에 안 들어감"/>
                             <TextBlock Text="{Binding Name}"/>
                         </StackPanel>
                     </DataTemplate>
@@ -83,6 +80,13 @@
                         Content="{Binding SelectedRecipeIsFavorite, Converter={StaticResource FavoriteStarText}}"
                         ToolTip="선택한 레시피를 즐겨찾기에 추가/제거"/>
                 <TextBox Text="{Binding SelectedRecipe.Name, UpdateSourceTrigger=PropertyChanged}"/>
+            </DockPanel>
+            <!-- 자유 라벨(danbooru 태그 아님) — 컨셉 분류·검색용. 쉼표로 여러 개, 포커스 아웃 시 커밋.
+                 일괄 생성 패널의 라벨 필터 칩이 이 값들로 채워진다. -->
+            <DockPanel DockPanel.Dock="Top" Margin="0,4,0,0">
+                <TextBlock DockPanel.Dock="Left" Text="태그: " VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
+                <TextBox Text="{Binding SelectedRecipeLabelsText, UpdateSourceTrigger=LostFocus}"
+                         ToolTip="쉼표로 구분해 여러 개 입력. danbooru 태그 아님 — 컨셉 분류용 자유 라벨(예: 전쟁, 불륜, 네토라레)."/>
             </DockPanel>
             <!-- 불러오기는 레시피 빌더의 현재 슬롯 구성을 통째로 교체한다(되돌릴 수 없음 —
                  다만 빌더 자체가 창을 닫을 때 항상 last-recipe.json에 자동 저장되므로
@@ -110,6 +114,16 @@
                         <DataTemplate>
                             <Expander Header="{Binding Header}" IsExpanded="False" Margin="0,0,0,2">
                                 <StackPanel Margin="18,2,4,4">
+                                    <!-- 랜덤 슬롯일 때만: min/max를 여기서 바로 편집(레시피 빌더로
+                                         안 옮겨도 됨). 편집하면 위 헤더의 "매줄 X~Y개"도 즉시 갱신. -->
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,2"
+                                                Visibility="{Binding IsRandomPool, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock Text="매줄 최소" VerticalAlignment="Center" FontSize="11"/>
+                                        <TextBox Text="{Binding MinCount}" Width="30" Margin="4,0" FontSize="11"/>
+                                        <TextBlock Text="~ 최대" VerticalAlignment="Center" FontSize="11"/>
+                                        <TextBox Text="{Binding MaxCount}" Width="30" Margin="4,0" FontSize="11"/>
+                                        <TextBlock Text="개" VerticalAlignment="Center" FontSize="11"/>
+                                    </StackPanel>
                                     <ItemsControl ItemsSource="{Binding InlineTags}">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>
@@ -131,12 +145,28 @@
                                         <Button DockPanel.Dock="Right" Content="추가" Margin="4,0,0,0" FontSize="11"
                                                 Command="{Binding AddTagCommand}"/>
                                         <TextBox Text="{Binding AddTagText, UpdateSourceTrigger=PropertyChanged}" FontSize="11"
-                                                 ToolTip="이 슬롯에 태그 추가(콤마로 여러 개, 자연어 문구 허용)">
+                                                 ToolTip="이 슬롯에 태그 추가(콤마로 여러 개, 자연어 문구 허용) — 타이핑하면 아래 자동완성 목록이 뜹니다">
                                             <TextBox.InputBindings>
                                                 <KeyBinding Key="Enter" Command="{Binding AddTagCommand}"/>
                                             </TextBox.InputBindings>
                                         </TextBox>
                                     </DockPanel>
+                                    <!-- 자동완성: 타이핑(콤마 뒤 마지막 조각) 기준으로 TagDatabase.SearchRanked가
+                                         찾은 후보. Popup 대신 인라인 목록으로 — Expander/ItemsControl 템플릿
+                                         안에서 Popup PlacementTarget이 꼬이는 걸 피한다. 클릭하면 오타 없이 바로 추가. -->
+                                    <ListBox ItemsSource="{Binding Suggestions}" FontSize="11" MaxHeight="140"
+                                             Margin="0,2,0,0" BorderThickness="1" BorderBrush="#CCCCCC"
+                                             Visibility="{Binding HasSuggestions, Converter={StaticResource BoolToVis}}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Padding="4,1" HorizontalContentAlignment="Left"
+                                                        Command="{Binding DataContext.SelectSuggestionCommand, RelativeSource={RelativeSource AncestorType=Expander}}"
+                                                        CommandParameter="{Binding}">
+                                                    <TextBlock Text="{Binding Name, Converter={StaticResource UnderToSpace}}"/>
+                                                </Button>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
                                     <TextBlock Text="{Binding PoolTagsText}" TextWrapping="Wrap" Margin="0,4,0,0"
                                                Foreground="#78909C" FontSize="11"
                                                Visibility="{Binding HasPool, Converter={StaticResource BoolToVis}}"/>

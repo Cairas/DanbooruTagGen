@@ -10,26 +10,9 @@ public enum SamplingMode
     Weighted = 1,
 }
 
-/// <summary>출력 형식. 모델마다 원하는 프롬프트 모양이 달라서 나눈다.
-/// <para>
-/// Tags(기본): Illustrious/NoobAI 계열용. 태그를 콤마로 나열한 한 줄. 태그가 많을수록 좋다.
-/// </para><para>
-/// Anima: Anima 계열용. 이 모델은 CLIP이 아니라 Qwen LLM을 텍스트 인코더로 써서 자연어를
-/// 잘 읽는 대신 **태그 과밀에 민감**하다. 그래서 COSMETIC 축(구도·조명·유두 디테일·체액)을
-/// 버려 태그 수를 줄이고, 뽑힌 태그에서 만든 영어 서술문을 뒤에 덧붙인다.
-/// 와일드카드 파일은 "한 줄 = 한 프롬프트"라서 두 줄로 쪼개지 않고 한 줄에 이어 쓴다.
-/// </para></summary>
-public enum PromptFormat
-{
-    Tags = 0,
-    Anima = 1,
-}
-
 public sealed class GenerationOptions
 {
     public int LineCount { get; set; } = 100;
-    /// <summary>출력 형식. 기본 Tags(기존 동작 그대로).</summary>
-    public PromptFormat Format { get; set; } = PromptFormat.Tags;
     public int? Seed { get; set; }
     public bool DedupeWithinLine { get; set; } = true;
     public bool AvoidDuplicateLines { get; set; } = true;

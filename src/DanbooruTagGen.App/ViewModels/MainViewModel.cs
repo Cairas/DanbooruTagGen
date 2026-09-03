@@ -22,9 +22,6 @@ public sealed partial class MainViewModel : ObservableObject
     public List<Recipe> SavedRecipes { get; private set; } = new();
     /// <summary>모순 태그 규칙(상호배타 그룹). 시작 시 data/conflicts.csv에서 로드.</summary>
     public Core.Generation.ConflictRules Conflicts { get; private set; } = Core.Generation.ConflictRules.Empty;
-    /// <summary>Anima 출력 모드용 태그→영어 서술 조각 사전. 시작 시 data/anima-phrases.csv에서 로드.
-    /// 파일이 없으면 빈 사전이라 Anima 모드가 서술문 없이 태그만 내보낸다(기능이 죽지는 않음).</summary>
-    public Core.Generation.AnimaPhraseBook AnimaPhrases { get; private set; } = Core.Generation.AnimaPhraseBook.Empty;
     /// <summary>태그 빈도·그룹 메타데이터 조회. 가중 추첨/순서 자동 배치에 생성기로 주입.
     /// 태그 DB 자체(TagDatabase)가 ITagLookup을 구현한다.</summary>
     public Core.Generation.ITagLookup? TagInfo { get; private set; }
@@ -70,7 +67,6 @@ public sealed partial class MainViewModel : ObservableObject
         var csvPaths = SettingsStore.ResolveCsvPaths(Settings);
         var db = await Task.Run(() => TagDatabase.LoadFromFiles(csvPaths));
         Conflicts = await Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
-        AnimaPhrases = await Task.Run(() => Core.Generation.AnimaPhraseBook.LoadFromFile(AppPaths.AnimaPhrasesFile));
         TagInfo = db;
         TagDb = db;
 
@@ -94,19 +90,12 @@ public sealed partial class MainViewModel : ObservableObject
     private FileSystemWatcher? _presetWatcher;
     private System.Windows.Threading.DispatcherTimer? _presetSyncDebounce;
 
-    /// <summary>data/presets(번들 축 풀·컨셉 팩)의 변경을 감지해 QuickSyncBundledPresets를
-    /// 자동으로 부른다. 예전엔 JSON을 스크립트로 고칠 때마다 "⟳ 프리셋 갱신"을 손으로
-    /// 눌러야 했다 — 이 병합 로직(PresetSeeder) 자체는 사용자 자작 항목을 보존하는 안전장치가
-    /// 이미 있으므로 그대로 재사용하고, 트리거만 자동화한다. data/presets/pools.json과
-    /// data/presets/recipes/*.json이 같은 상위 폴더 아래 있어 감시자 하나(하위 폴더 포함)로 충분하다.
-    /// 짧은 시간 안에 여러 파일이 연달아 바뀌어도(레시피 스크립트가 pools.json → recipe.json
-    /// 순으로 따로 쓰는 경우 등) 디바운스로 한 번만 동기화한다 — 중간에 여러 번 불려도
-    /// QuickSyncBundledPresets 자체가 멱등이라 해롭지 않다.</summary>
+    /// <summary>data/presets(번들 축 풀·컨셉 팩)의 변경을 감지해 자동으로 다시 읽는다. 예전엔
+    /// JSON을 스크립트로 고칠 때마다 "⟳ 프리셋 갱신"을 손으로 눌러야 했다 — 이 병합 로직
+    /// (PresetSeeder) 자체는 사용자 자작 항목을 보존하는 안전장치가 이미 있으므로 그대로
+    /// 재사용하고, 트리거만 자동화한다.</summary>
     private void StartPresetWatcher()
     {
-        var dir = Path.GetDirectoryName(AppPaths.PresetPoolsFile);
-        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
-
         _presetSyncDebounce = new System.Windows.Threading.DispatcherTimer
         {
             Interval = TimeSpan.FromMilliseconds(400),
@@ -128,16 +117,20 @@ public sealed partial class MainViewModel : ObservableObject
             });
         }
 
-        _presetWatcher = new FileSystemWatcher(dir, "*.json")
+        var presetsDir = Path.GetDirectoryName(AppPaths.PresetPoolsFile);
+        if (!string.IsNullOrEmpty(presetsDir) && Directory.Exists(presetsDir))
         {
-            IncludeSubdirectories = true,
-            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
-        };
-        _presetWatcher.Changed += OnChanged;
-        _presetWatcher.Created += OnChanged;
-        _presetWatcher.Deleted += OnChanged;
-        _presetWatcher.Renamed += OnChanged;
-        _presetWatcher.EnableRaisingEvents = true;
+            _presetWatcher = new FileSystemWatcher(presetsDir, "*.json")
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+            };
+            _presetWatcher.Changed += OnChanged;
+            _presetWatcher.Created += OnChanged;
+            _presetWatcher.Deleted += OnChanged;
+            _presetWatcher.Renamed += OnChanged;
+            _presetWatcher.EnableRaisingEvents = true;
+        }
     }
 
     public void SavePools() => PoolStore.Save(Pools, AppPaths.PoolsFile);
@@ -214,6 +207,16 @@ public sealed partial class MainViewModel : ObservableObject
             RecipeBuilder?.RefreshPools();
             RecipeLibrary?.Refresh();
             Generation?.RefreshBatchRecipes();
+
+            // 빌더에 이미 불러와 편집 중인 레시피가 이번 갱신 대상에 포함돼 있으면 화면도
+            // 같이 최신으로 맞춘다 — 안 그러면 퀵갱신을 눌러도 빌더에 열어 둔 내용은 그대로
+            // 남아 "갱신이 안 먹힌다"는 인상을 준다(2026-08-26).
+            var loadedId = RecipeBuilder?.LoadedRecipeId;
+            if (!string.IsNullOrEmpty(loadedId))
+            {
+                var fresh = bundledRecipes.FirstOrDefault(r => r.Id == loadedId);
+                if (fresh != null) RecipeBuilder!.LoadRecipe(fresh);
+            }
         }
         Status = $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}.";
     }

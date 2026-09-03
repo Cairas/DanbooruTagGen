@@ -67,8 +67,7 @@ public sealed class WildcardGenerator
         IReadOnlyDictionary<string, Pool> poolsById,
         GenerationOptions options,
         ConflictRules? conflicts = null,
-        ITagLookup? tagInfo = null,
-        AnimaPhraseBook? phrases = null)
+        ITagLookup? tagInfo = null)
     {
         Validate(recipe, poolsById);
 
@@ -84,13 +83,17 @@ public sealed class WildcardGenerator
         var seen = new HashSet<string>(StringComparer.Ordinal);
         bool dupWarned = false, conflictWarned = false;
 
-        var book = phrases ?? AnimaPhraseBook.Empty;
+        // ALT 슬롯마다 "바로 전 줄에서 뽑힌 그룹"을 기억해 뒀다가, 이번 줄에서 같은 그룹이
+        // 다시 뽑히면 몇 번만 다시 굴려 본다("장면 도입"처럼 옵션이 2~3개뿐인 슬롯이 같은
+        // 문장을 여러 줄 연달아 뽑아 화면에서 "다 똑같다"는 인상을 주는 걸 줄이려는 목적,
+        // 2026-08-26). 이 딕셔너리는 Generate() 호출 하나 안에서만 산다 — 다른 레시피/다른
+        // Generate() 호출로 새지 않는다.
+        var lastPickedByAlt = new Dictionary<AlternativeSlot, AlternativeGroup>();
 
         // 한 줄을 생성하고(가중 추첨) 표준 순서로 정렬한다. 재추첨 루프와 공유.
-        // 태그의 출처(SlotRole)를 같이 들고 다녀야 Anima 형식이 COSMETIC을 버릴 수 있다.
         List<(string Tag, SlotRole Role)> NextParts()
         {
-            var p = GenerateLineParts(recipe, poolsById, options, rnd, tagInfo);
+            var p = GenerateLineParts(recipe, poolsById, options, rnd, tagInfo, lastPickedByAlt);
             if (orderer is null) return p;
             // 정렬은 태그 기준이므로, 정렬 결과 순서에 맞춰 역할을 다시 붙인다.
             var roleOf = new Dictionary<string, SlotRole>(StringComparer.Ordinal);
@@ -101,9 +104,7 @@ public sealed class WildcardGenerator
         }
 
         string Render(List<(string Tag, SlotRole Role)> parts) =>
-            options.Format == PromptFormat.Anima
-                ? book.Render(parts, options.UnderscoreToSpace)
-                : JoinLine(parts.Select(p => p.Tag).ToList(), options);
+            JoinLine(parts.Select(p => p.Tag).ToList(), options);
 
         for (int i = 0; i < options.LineCount; i++)
         {
@@ -163,15 +164,16 @@ public sealed class WildcardGenerator
         return picked.Select(p => p.Tag).ToList();
     }
 
-    /// <summary>한 줄의 태그를 "어느 역할의 슬롯에서 나왔는지"와 함께 생성한다.
-    /// Anima 형식이 COSMETIC 태그를 버리고 MAJOR 태그로 서술문을 만들어야 해서 출처가 필요하다.
+    /// <summary>한 줄의 태그를 "어느 역할의 슬롯에서 나왔는지"와 함께 생성한다. 태그 순서
+    /// 자동 배치(TagOrdering)가 역할별로 재배치할 때 이 출처 정보가 필요하다.
     /// 기존 <see cref="GenerateLineTags"/>는 여기서 태그만 뽑아 쓴다(동작 동일).</summary>
     internal List<(string Tag, SlotRole Role)> GenerateLineParts(
         Recipe recipe,
         IReadOnlyDictionary<string, Pool> poolsById,
         GenerationOptions options,
         IRandomSource rnd,
-        ITagLookup? tagInfo = null)
+        ITagLookup? tagInfo = null,
+        Dictionary<AlternativeSlot, AlternativeGroup>? lastPickedByAlt = null)
     {
         var blocklist = new HashSet<string>(options.Blocklist, StringComparer.Ordinal);
         var seenTags = options.DedupeWithinLine ? new HashSet<string>(StringComparer.Ordinal) : null;
@@ -193,7 +195,10 @@ public sealed class WildcardGenerator
                 case AlternativeSlot alt:
                     if (alt.Groups.Count > 0)
                     {
-                        var group = PickGroup(alt, rnd);
+                        AlternativeGroup? avoid = null;
+                        lastPickedByAlt?.TryGetValue(alt, out avoid);
+                        var group = PickGroup(alt, rnd, avoid);
+                        if (lastPickedByAlt != null) lastPickedByAlt[alt] = group;
                         foreach (var t in group.Tags) Add(t, role);
                     }
                     break;
@@ -209,16 +214,18 @@ public sealed class WildcardGenerator
         }
     }
 
-    /// <summary>태그 목록을 출력 한 줄로 합친다. 출력 시점에만 '_'→공백 변환.
-    /// anima-only로 표시된 항목(<see cref="AnimaPhraseBook.IsAnimaOnly"/>)은 Tags 모드 줄에서
-    /// 아예 뺀다 — Anima 서술문 전용이라 danbooru 태그가 아니다.</summary>
+    /// <summary>태그 목록을 출력 한 줄로 합친다. 출력 시점에만 '_'→공백 변환.</summary>
     private static string JoinLine(List<string> tags, GenerationOptions options)
     {
-        var visible = tags.Where(t => !AnimaPhraseBook.IsAnimaOnly(t));
         return options.UnderscoreToSpace
-            ? string.Join(", ", visible.Select(AnimaPhraseBook.ToDisplay))
-            : string.Join(", ", visible);
+            ? string.Join(", ", tags.Select(ToDisplay))
+            : string.Join(", ", tags);
     }
+
+    /// <summary>출력용 표기. '_'를 공백으로 바꾸되 <c>@_@</c>처럼 **글자가 없는 기호 태그**는
+    /// 건드리지 않는다 — 바꾸면 "@ @"가 되어 원래 뜻(어질어질한 눈)을 잃는다.</summary>
+    private static string ToDisplay(string tag) =>
+        tag.Any(char.IsLetter) ? tag.Replace('_', ' ') : tag;
 
     internal string GenerateLine(
         Recipe recipe,
@@ -312,9 +319,36 @@ public sealed class WildcardGenerator
         return picked;
     }
 
-    /// <summary>대안 그룹 하나를 가중치에 비례해 선택한다. 모든 가중치가 기본값 1이면
-    /// 기존과 똑같은 균등 추첨이 된다(하위 호환). 가중치 0인 그룹은 절대 뽑히지 않는다.</summary>
-    private static AlternativeGroup PickGroup(AlternativeSlot alt, IRandomSource rnd)
+    /// <summary>대안 그룹 하나를 가중치에 비례해 선택한다. <paramref name="avoid"/>가 주어지고
+    /// (=바로 전 줄에서 이 슬롯이 뽑은 그룹) **뽑을 수 있는 그룹의 가중치가 전부 같으면**, 같은
+    /// 그룹이 다시 나온 경우 최대 <see cref="MaxAvoidRepeatRetries"/>번만 다시 굴려 본다.
+    /// 가중치가 서로 다르면(예: 샷 크기 3/2/1) 건드리지 않는다 — 무거운 쪽이 연달아 나오는 건
+    /// 의도된 편중이라, 반복을 피하려고 재추첨하면 그 편중 자체가 무너진다(실측: 4:1 비중에서
+    /// 재추첨을 걸었더니 80%가 나와야 할 쪽이 57%로 주저앉음, `WeightDistributionMatchesRatio
+    /// OverManyLines` 회귀). "장면 도입"처럼 가중치가 다 같은(대개 전부 1) 슬롯에서만 의미가
+    /// 있고, 그게 바로 이 기능이 노리는 대상이다. 무한 루프 위험은 없다 — for 루프로 하드
+    /// 캡을 걸어 뒀고, 다 실패해도 마지막 결과를 그냥 받아들이고 끝낸다.</summary>
+    private const int MaxAvoidRepeatRetries = 5;
+
+    private static AlternativeGroup PickGroup(AlternativeSlot alt, IRandomSource rnd, AlternativeGroup? avoid = null)
+    {
+        var picked = PickGroupOnce(alt, rnd);
+        if (avoid is null) return picked;
+
+        var viable = alt.Groups.Where(g => g.Weight > 0).ToList();
+        if (viable.Count <= 1) return picked; // 다른 선택지가 없으면 피할 방법도 없다.
+        if (viable.Any(g => g.Weight != viable[0].Weight)) return picked; // 가중치가 다르면 편중을 존중.
+
+        for (int tries = 0; ReferenceEquals(picked, avoid) && tries < MaxAvoidRepeatRetries; tries++)
+            picked = PickGroupOnce(alt, rnd);
+
+        return picked;
+    }
+
+    /// <summary>대안 그룹 하나를 가중치에 비례해 선택한다(반복 회피 없는 원본 로직). 모든
+    /// 가중치가 기본값 1이면 기존과 똑같은 균등 추첨이 된다(하위 호환). 가중치 0인 그룹은
+    /// 절대 뽑히지 않는다.</summary>
+    private static AlternativeGroup PickGroupOnce(AlternativeSlot alt, IRandomSource rnd)
     {
         long total = 0;
         foreach (var g in alt.Groups) total += g.Weight;

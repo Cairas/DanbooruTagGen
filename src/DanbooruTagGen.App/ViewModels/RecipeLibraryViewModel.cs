@@ -5,6 +5,7 @@ using CommunityToolkit.Mvvm.Input;
 using DanbooruTagGen.App.Services;
 using DanbooruTagGen.Core.Models;
 using DanbooruTagGen.Core.Persistence;
+using DanbooruTagGen.Core.Tags;
 
 namespace DanbooruTagGen.App.ViewModels;
 
@@ -17,11 +18,15 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     private readonly Slot _slot;
     /// <summary>이 슬롯이 참조하는 풀(들) — PoolId 하나 + 체이닝된 ExtraPoolIds 전부.</summary>
     private readonly IReadOnlyList<Pool> _pools;
+    /// <summary>태그 추가 자동완성용 조회. 앱 시작 전(TagDb 로드 전)이면 null — 자동완성만
+    /// 조용히 비활성화되고 직접 타이핑은 그대로 동작한다.</summary>
+    private readonly TagDatabase? _tagDb;
 
-    public SlotPreviewViewModel(Slot slot, IReadOnlyList<Pool> pools)
+    public SlotPreviewViewModel(Slot slot, IReadOnlyList<Pool> pools, TagDatabase? tagDb = null)
     {
         _slot = slot;
         _pools = pools;
+        _tagDb = tagDb;
         InlineTags = slot switch
         {
             FixedSlot f => f.Tags,
@@ -37,8 +42,50 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     public string PoolTagsText => _pools.Count == 0 ? "" : string.Join("\n",
         _pools.Select(p => $"풀 '{p.Name}' 후보(수정은 풀 라이브러리에서): {string.Join(", ", p.Candidates)}"));
 
+    /// <summary>랜덤 슬롯일 때만 min/max 편집칸을 보여준다(고정/대안 슬롯엔 개수 개념이 없음).</summary>
+    public bool IsRandomPool => _slot is RandomPoolSlot;
+
+    /// <summary>슬롯의 MinCount/MaxCount를 직접 편집한다(레시피 빌더로 불러올 필요 없이
+    /// 라이브러리에서 바로). 레시피 빌더(RecipeBuilderView.xaml)의
+    /// "TextBox Text={Binding MinCount}" 패턴과 동일하게 슬롯 속성에 바로 바인딩.</summary>
+    public int MinCount
+    {
+        get => (_slot as RandomPoolSlot)?.MinCount ?? 0;
+        set { if (_slot is RandomPoolSlot r && r.MinCount != value) { r.MinCount = value; OnPropertyChanged(); RefreshHeader(); } }
+    }
+
+    public int MaxCount
+    {
+        get => (_slot as RandomPoolSlot)?.MaxCount ?? 0;
+        set { if (_slot is RandomPoolSlot r && r.MaxCount != value) { r.MaxCount = value; OnPropertyChanged(); RefreshHeader(); } }
+    }
+
     [ObservableProperty] private string _header = "";
     [ObservableProperty] private string _addTagText = "";
+
+    /// <summary>추가 입력칸의 자동완성 후보(최대 8개). 콤마로 여러 개를 입력하는 중이면
+    /// 마지막 조각만 검색어로 쓴다 — "1girl, sm" 이라고 치는 중이면 "sm"만 검색.</summary>
+    public ObservableCollection<Tag> Suggestions { get; } = new();
+    public bool HasSuggestions => Suggestions.Count > 0;
+
+    partial void OnAddTagTextChanged(string value)
+    {
+        Suggestions.Clear();
+        var lastPiece = value.Contains(',') ? value[(value.LastIndexOf(',') + 1)..].Trim() : value.Trim();
+        if (_tagDb != null && lastPiece.Length > 0)
+            foreach (var t in _tagDb.SearchRanked(lastPiece, 8)) Suggestions.Add(t);
+        OnPropertyChanged(nameof(HasSuggestions));
+    }
+
+    /// <summary>자동완성 목록에서 하나를 클릭하면 입력칸의 마지막 조각을 그 태그로 바꿔
+    /// 즉시 슬롯에 추가한다(오타 방지가 목적이므로 클릭 한 번으로 끝나야 함).</summary>
+    [RelayCommand]
+    private void SelectSuggestion(Tag tag)
+    {
+        var comma = AddTagText.LastIndexOf(',');
+        AddTagText = comma >= 0 ? AddTagText[..(comma + 1)] + " " + tag.Name : tag.Name;
+        AddTag();
+    }
 
     private void RefreshHeader()
     {
@@ -75,6 +122,8 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
         foreach (var piece in AddTagText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             if (!InlineTags.Contains(piece)) InlineTags.Add(piece);
         AddTagText = "";
+        Suggestions.Clear();
+        OnPropertyChanged(nameof(HasSuggestions));
         RefreshHeader();
     }
 }
@@ -121,6 +170,25 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     /// <summary>선택 레시피의 슬롯별 실제 내용물(인라인 태그 + 참조 풀 후보). 미리보기가 바라본다.</summary>
     public ObservableCollection<SlotPreviewViewModel> SelectedRecipePreview { get; } = new();
 
+    /// <summary>선택 레시피의 자유 라벨(Recipe.Labels)을 쉼표 구분 문자열로 편집하는 패스스루.
+    /// danbooru 태그가 아니라 컨셉 분류용 — LostFocus로 커밋(매 키 입력마다 쪼개면 중간 상태가
+    /// 깨진다). 커밋되면 즉시 저장하고, 일괄 생성 패널의 라벨 필터 칩 목록도 다시 채운다.</summary>
+    public string SelectedRecipeLabelsText
+    {
+        get => SelectedRecipe is null ? "" : string.Join(", ", SelectedRecipe.Labels);
+        set
+        {
+            if (SelectedRecipe is null) return;
+            SelectedRecipe.Labels = value
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            OnPropertyChanged();
+            _main.SaveRecipeLibrary();
+            _main.Generation.RefreshBatchRecipes();
+        }
+    }
+
     public RecipeLibraryViewModel(MainViewModel main)
     {
         _main = main;
@@ -143,6 +211,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         RebuildPreview();
         QuickPreviewText = "";
         SelectedRecipeIsFavorite = value != null && _main.Settings.FavoriteRecipeIds.Contains(value.Id);
+        OnPropertyChanged(nameof(SelectedRecipeLabelsText));
     }
 
     /// <summary>선택 레시피의 미리보기를 다시 채운다. 풀 참조 슬롯은 풀 이름과 그 후보까지
@@ -154,7 +223,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         if (SelectedRecipe == null) return;
 
         foreach (var slot in SelectedRecipe.Slots)
-            SelectedRecipePreview.Add(new SlotPreviewViewModel(slot, ResolveSlotPools(slot)));
+            SelectedRecipePreview.Add(new SlotPreviewViewModel(slot, ResolveSlotPools(slot), _main.TagDb));
     }
 
     /// <summary>슬롯이 참조하는 풀들을 전부 모은다(PoolId 하나 + 체이닝된 ExtraPoolIds).
@@ -316,10 +385,9 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         return JsonSerializer.Deserialize<Recipe>(json, JsonStore.Options)!;
     }
 
-    /// <summary>Recipes 전체의 검증 배지(모순·시각 다양성·Anima 조각 커버리지)를 다시
-    /// 계산한다. 목록이 통째로 바뀔 때(생성자, Refresh, 복제/새로 저장)만 부르면 되고,
-    /// 검색어 입력 같은 필터링에서는 다시 계산할 필요 없다 — RefreshFilter는 이미 계산된
-    /// 값을 그대로 보여주기만 한다.</summary>
+    /// <summary>Recipes 전체의 검증 배지(모순·시각 다양성)를 다시 계산한다. 목록이 통째로
+    /// 바뀔 때(생성자, Refresh, 복제/새로 저장)만 부르면 되고, 검색어 입력 같은 필터링에서는
+    /// 다시 계산할 필요 없다 — RefreshFilter는 이미 계산된 값을 그대로 보여주기만 한다.</summary>
     private void RefreshBadges()
     {
         var poolsById = _main.Pools.ToDictionary(p => p.Id);
@@ -327,7 +395,6 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         {
             r.ConflictBadge = ComputeConflictBadge(r);
             r.VarietyBadge = ComputeVarietyBadge(r, poolsById);
-            r.AnimaBadge = ComputeAnimaBadge(r, poolsById);
         }
     }
 
@@ -337,15 +404,6 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     {
         var major = Core.Generation.VarietyAnalyzer.ComputeMajorCombinations(recipe, poolsById);
         return major < Core.Generation.VarietyAnalyzer.Threshold ? $"🔸{major}" : "";
-    }
-
-    /// <summary>Anima 서술 조각이 없는 태그가 있으면("Anima 모드로 뽑으면 이 단어들은 문장에서
-    /// 조용히 빠진다") 개수 배지를 붙인다. tools/anima_phrase_scan.py를 포팅한
-    /// AnimaPhraseBook.FindMissingPhrases 재사용.</summary>
-    private string ComputeAnimaBadge(Recipe recipe, IReadOnlyDictionary<string, Core.Models.Pool> poolsById)
-    {
-        var missing = _main.AnimaPhrases.FindMissingPhrases(recipe, poolsById);
-        return missing.Count > 0 ? $"📝{missing.Count}" : "";
     }
 
     /// <summary>레시피 하나의 모순 배지 계산. RecipeBuilderViewModel.RefreshConflicts와 같은
@@ -393,7 +451,6 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         var poolsById = _main.Pools.ToDictionary(p => p.Id);
         snapshot.ConflictBadge = ComputeConflictBadge(snapshot);
         snapshot.VarietyBadge = ComputeVarietyBadge(snapshot, poolsById);
-        snapshot.AnimaBadge = ComputeAnimaBadge(snapshot, poolsById);
         Recipes.Add(snapshot);
         RefreshFilter();
         SelectedRecipe = FilteredRecipes.Contains(snapshot) ? snapshot : SelectedRecipe;
@@ -416,7 +473,6 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         // 슬롯 구성이 동일하니 배지도 그대로 복사(재계산 불필요).
         copy.ConflictBadge = SelectedRecipe.ConflictBadge;
         copy.VarietyBadge = SelectedRecipe.VarietyBadge;
-        copy.AnimaBadge = SelectedRecipe.AnimaBadge;
         var insertAt = Recipes.IndexOf(SelectedRecipe) + 1;
         Recipes.Insert(insertAt, copy);
         RefreshFilter();
@@ -435,12 +491,9 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
             _main.Status = "불러올 레시피를 먼저 선택하세요.";
             return;
         }
-        var copy = Clone(SelectedRecipe);
-        _main.RecipeBuilder.Slots.Clear();
-        foreach (var slot in copy.Slots) _main.RecipeBuilder.Slots.Add(slot);
-        _main.RecipeBuilder.SelectedSlot = _main.RecipeBuilder.Slots.FirstOrDefault();
-        _main.RecipeBuilder.RefreshConflicts();
-        _main.Status = $"레시피 '{SelectedRecipe.Name}' 불러옴 ({copy.Slots.Count}개 슬롯)";
+        var slotCount = SelectedRecipe.Slots.Count;
+        _main.RecipeBuilder.LoadRecipe(SelectedRecipe);
+        _main.Status = $"레시피 '{SelectedRecipe.Name}' 불러옴 ({slotCount}개 슬롯)";
     }
 
     [RelayCommand]

@@ -22,9 +22,15 @@ public sealed class Settings
     public bool UnderscoreToSpace { get; set; } = true;
     public bool WeightedSampling { get; set; }
     public bool AutoOrderTags { get; set; }
-    /// <summary>Anima 출력 모드(태그 나열 + 영어 서술문). 기본 꺼짐 —
-    /// 지금까지의 컨셉은 Illustrious 계열 기준으로 만든 태그라 기존 동작이 기본이다.</summary>
-    public bool AnimaFormat { get; set; }
+
+    /// <summary>매 줄 맨 앞에 품질/안전 등급 태그를 붙일지. 기본 꺼짐 — 이미 자기만의
+    /// 품질 태그를 ComfyUI 쪽에서 따로 쓰는 사용자를 위한 옵트인. 이 기능이 있는 이유는
+    /// 그런 워크플로를 안 가진 사용자도 이 프로그램만으로 바로 완성된 프롬프트를 뽑을 수
+    /// 있게 하기 위함이다.</summary>
+    public bool QualityTagsEnabled { get; set; }
+    /// <summary>QualityTagsEnabled가 켜졌을 때 매 줄 앞에 붙는 텍스트. 사용자가 자유롭게 수정 가능.</summary>
+    public string QualityTagsText { get; set; } =
+        "masterpiece, score_9, score_8, score_7, score_6, best quality, amazing quality, very aesthetic, extremely detailed, very detailed, absurdres, newest, highres, uncensored";
 
     /// <summary>한 번이라도 사용자 데이터에 주입한 번들 프리셋 id 목록(PresetSeeder).
     /// 여기 있는 프리셋은 사용자가 지워도 다시 살아나지 않는다 — 삭제도 커스텀이므로.</summary>
