@@ -20,6 +20,27 @@
                 <Button Content="삭제" Command="{Binding RemoveSelectedCommand}" Margin="0,0,4,0"/>
                 <Button Content="저장" Command="{Binding SaveCommand}"/>
             </StackPanel>
+            <!-- 전체 검사: 없는 태그(오탈자)와 상대 없는 행위 태그를 라이브러리 전체에서 찾는다.
+                 예전엔 tools/*.py를 따로 돌려야만 알 수 있었다. 결과는 아래 목록에 문제 팩만. -->
+            <DockPanel DockPanel.Dock="Top" Margin="0,4,0,0">
+                <Button DockPanel.Dock="Left" Content="🔍 전체 검사" Command="{Binding AuditAllCommand}"
+                        ToolTip="모든 레시피에서 danbooru에 없는 태그와 상대 없는 행위 태그를 찾습니다."/>
+                <TextBlock Text="{Binding AuditSummary}" Margin="6,0,0,0" FontSize="11"
+                           Foreground="#555" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+            <Border DockPanel.Dock="Top" Margin="0,4,0,0" MaxHeight="150"
+                    BorderBrush="#E0A030" BorderThickness="1" Background="#FFFBF0"
+                    Visibility="{Binding HasAuditRows, Converter={StaticResource BoolToVis}}">
+                <ListBox ItemsSource="{Binding AuditRows}" SelectedItem="{Binding SelectedAuditRow}"
+                         BorderThickness="0" Background="Transparent"
+                         ScrollViewer.VerticalScrollBarVisibility="Auto">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Header}" FontSize="11" ToolTip="{Binding Detail}"/>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Border>
             <!-- 일반/성인 필터: 레시피 내용물(슬롯 태그·참조 풀)로 판정. 태그 검색과 같은 3버튼. -->
             <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,4,0,0">
                 <Button Content="전체" Padding="8,1"
@@ -107,6 +128,14 @@
                          MaxHeight="110" VerticalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="11"
                          Visibility="{Binding QuickPreviewText, Converter={StaticResource NonEmptyToVis}}"/>
             </DockPanel>
+            <!-- 이 팩의 검증 지적(없는 태그·상대 없는 행위). 문제 없으면 아예 안 뜬다. -->
+            <Border DockPanel.Dock="Top" Margin="0,4,0,0" Padding="6"
+                    Background="#FFFBF0" BorderBrush="#E0A030" BorderThickness="1" MaxHeight="90"
+                    Visibility="{Binding ValidationText, Converter={StaticResource NonEmptyToVis}}">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <TextBlock Text="{Binding ValidationText}" TextWrapping="Wrap" FontSize="11" Foreground="#7A4B00"/>
+                </ScrollViewer>
+            </Border>
             <TextBlock DockPanel.Dock="Top" Text="미리보기·편집 (항목을 펼치면 태그를 지우거나 추가할 수 있습니다 — 창을 닫으면 자동 저장)"
                        Foreground="Gray" FontSize="11" Margin="0,4,0,0" TextWrapping="Wrap"/>
             <!-- 슬롯별 실제 내용물(편집 가능): 칩 클릭=삭제, 아래 입력칸=추가.

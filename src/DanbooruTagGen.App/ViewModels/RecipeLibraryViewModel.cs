@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using DanbooruTagGen.App.Services;
@@ -135,6 +137,13 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     }
 }
 
+/// <summary>전체 검사 결과 한 줄 — 지적이 나온 팩 하나와 그 지적들.</summary>
+public sealed record AuditRow(string RecipeId, string RecipeName, IReadOnlyList<Core.Generation.ValidationIssue> Issues)
+{
+    public string Header => $"{RecipeName} — {Issues.Count}건";
+    public string Detail => string.Join("\n", Issues.Select(i => "· " + i.Message));
+}
+
 /// <summary>레시피(슬롯 구성 전체)를 이름 붙여 여러 개 저장/불러오기. Pool 라이브러리는 태그
 /// 묶음을 여러 개 저장해 놓고 골라 쓸 수 있는데, 레시피 빌더는 "마지막 작업 상태" 하나만
 /// 자동 저장/복원했었다 — 레시피 전체 구성도 여러 프리셋으로 저장해 두고 바꿔 쓰고 싶다는
@@ -173,6 +182,33 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
 
     /// <summary>라이브러리 창을 안 거치고 바로 뽑아보는 짧은 샘플(5줄). 빌더 상태는 건드리지 않는다.</summary>
     [ObservableProperty] private string _quickPreviewText = "";
+
+    /// <summary>선택 레시피의 검증 지적("없는 태그"·"상대 없는 행위"). 비어 있으면 문제 없음.</summary>
+    [ObservableProperty] private string _validationText = "";
+    /// <summary>전체 검사 결과 요약 + 진행률. 검사 중에는 진행률이, 끝나면 요약이 들어간다.</summary>
+    [ObservableProperty] private string _auditSummary = "";
+    /// <summary>전체 검사에서 지적이 나온 팩만. 클릭하면 그 팩으로 이동한다.</summary>
+    public ObservableCollection<AuditRow> AuditRows { get; } = new();
+    /// <summary>검사 결과 목록을 보여줄지(지적이 하나라도 있을 때만). AuditRows를 채우거나
+    /// 비운 뒤 직접 통지한다 — 컬렉션 개수 변화는 바인딩이 알아서 알려주지 않는다.</summary>
+    public bool HasAuditRows => AuditRows.Count > 0;
+    [ObservableProperty] private AuditRow? _selectedAuditRow;
+
+    partial void OnSelectedAuditRowChanged(AuditRow? value)
+    {
+        if (value == null) return;
+        // 검사 결과에서 팩을 고르면 필터를 넘어 그 팩을 바로 띄운다(필터에 가려 안 보일 수 있다).
+        var target = Recipes.FirstOrDefault(r => r.Id == value.RecipeId);
+        if (target == null) return;
+        if (!FilteredRecipes.Contains(target))
+        {
+            SearchText = "";
+            SelectedCategory = AllCategoriesLabel;
+            RecipeFilter = NsfwFilterMode.All;
+            ShowFavoritesOnly = false;
+        }
+        SelectedRecipe = target;
+    }
 
     /// <summary>선택 레시피의 슬롯별 실제 내용물(인라인 태그 + 참조 풀 후보). 미리보기가 바라본다.</summary>
     public ObservableCollection<SlotPreviewViewModel> SelectedRecipePreview { get; } = new();
@@ -217,6 +253,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     partial void OnSelectedRecipeChanged(Recipe? value)
     {
         RebuildPreview();
+        RefreshValidation();
         QuickPreviewText = "";
         SelectedRecipeIsFavorite = value != null && _main.Settings.FavoriteRecipeIds.Contains(value.Id);
         OnPropertyChanged(nameof(SelectedRecipeLabelsText));
@@ -326,6 +363,60 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         else { favorites.Add(id); SelectedRecipeIsFavorite = true; }
         SettingsStore.Save(_main.Settings);
         if (ShowFavoritesOnly) RefreshFilter();
+    }
+
+    /// <summary>선택 레시피의 검증 결과를 다시 계산한다. 사전에 없는 태그와 상대 없는 행위
+    /// 태그를 잡는다 — 예전엔 tools/*.py를 따로 돌려야만 알 수 있었다.</summary>
+    private void RefreshValidation()
+    {
+        if (SelectedRecipe == null) { ValidationText = ""; return; }
+        var issues = ValidateRecipe(SelectedRecipe);
+        ValidationText = issues.Count == 0 ? "" : "⚠ " + string.Join("\n⚠ ", issues.Select(i => i.Message));
+    }
+
+    private IReadOnlyList<Core.Generation.ValidationIssue> ValidateRecipe(Recipe recipe) =>
+        Core.Generation.RecipeValidator.Validate(
+            recipe, _main.Pools.ToDictionary(p => p.Id), _main.TagInfo, Suggest);
+
+    /// <summary>오탈자와 비슷한 실제 태그 이름 3개까지. 태그 DB가 아직 없으면 빈 목록.</summary>
+    private IReadOnlyList<string> Suggest(string tag) =>
+        _main.TagDb?.SearchRanked(tag.Replace('_', ' '), 3).Select(t => t.Name).ToList()
+        ?? (IReadOnlyList<string>)Array.Empty<string>();
+
+    /// <summary>라이브러리 전체를 훑어 지적이 있는 팩만 모은다. 228팩 × 태그 수천 개라
+    /// UI를 막지 않도록 백그라운드에서 돌리고 진행률을 표시한다.</summary>
+    [RelayCommand]
+    private async Task AuditAll(CancellationToken token)
+    {
+        var snapshot = Recipes.ToList();
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+        var lookup = _main.TagInfo;
+        AuditRows.Clear();
+        OnPropertyChanged(nameof(HasAuditRows));
+        AuditSummary = "검사 중…";
+
+        try
+        {
+            var found = await Task.Run(() =>
+            {
+                var rows = new List<AuditRow>();
+                for (int i = 0; i < snapshot.Count; i++)
+                {
+                    token.ThrowIfCancellationRequested();
+                    var issues = Core.Generation.RecipeValidator.Validate(snapshot[i], pools, lookup);
+                    if (issues.Count > 0)
+                        rows.Add(new AuditRow(snapshot[i].Id, snapshot[i].Name, issues));
+                }
+                return rows;
+            }, token);
+
+            foreach (var row in found) AuditRows.Add(row);
+            OnPropertyChanged(nameof(HasAuditRows));
+            AuditSummary = found.Count == 0
+                ? $"✅ {snapshot.Count}개 팩 전부 이상 없음"
+                : $"⚠ {snapshot.Count}개 중 {found.Count}개 팩에서 지적 {found.Sum(r => r.Issues.Count)}건";
+        }
+        catch (OperationCanceledException) { AuditSummary = "검사 취소됨"; }
     }
 
     /// <summary>빌더 상태를 건드리지 않고 선택 레시피만으로 5줄 뽑아 보여준다. 생성 탭의
