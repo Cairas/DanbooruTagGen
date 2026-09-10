@@ -48,16 +48,29 @@ public sealed partial class MainViewModel : ObservableObject
     /// 번들 파일이 없거나 손상돼도 LoadOrDefault가 빈 목록을 주므로 앱 시작은 막히지 않는다.</summary>
     private void SeedBundledPresets()
     {
-        var bundledPools = PoolStore.Load(AppPaths.PresetPoolsFile);
-        var bundledRecipes = RecipeLibraryStore.Load(AppPaths.PresetRecipesDir);
-        var seeded = new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal);
-        if (PresetSeeder.Seed(Pools, bundledPools, SavedRecipes, bundledRecipes, seeded))
+        // 번들 읽기 실패(작성 중인 파일 잠금·id 중복 등)로 앱 시작 자체가 죽지 않게 한다.
+        // 실패하면 이번 실행에선 시딩을 건너뛸 뿐이고, 원인은 상태 표시줄에 남는다.
+        if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out var error))
         {
-            Settings.SeededPresetIds = seeded.ToList();
-            SettingsStore.Save(Settings);
-            SavePools();
-            SaveRecipeLibrary();
+            Status = "번들 프리셋을 읽지 못해 시딩을 건너뜁니다 — " + error;
+            return;
         }
+        var seeded = new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal);
+        if (PresetSeeder.Seed(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded))
+            CommitSeeding(seeded);
+    }
+
+    /// <summary>시딩 결과를 디스크에 쓴다. <b>순서가 중요하다</b> — 실제 데이터(풀·레시피)를
+    /// 먼저 쓰고, "이미 주입했다"는 장부(settings.json의 seededIds)를 맨 마지막에 쓴다.
+    /// 반대로 하면 중간에 죽었을 때 장부에만 id가 남아, 그 팩은 재시작해도 영영 안 들어온다
+    /// (실제로 팩 하나가 이 상태로 사라져 있었다).</summary>
+    private void CommitSeeding(HashSet<string> seeded)
+    {
+        SavePools();
+        SaveRecipeLibrary();
+        Settings.SeededPresetIds = seeded.ToList();
+        _seededIdLookup = null;
+        SettingsStore.Save(Settings);
     }
 
     public async Task InitializeAsync()
@@ -89,6 +102,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private FileSystemWatcher? _presetWatcher;
     private System.Windows.Threading.DispatcherTimer? _presetSyncDebounce;
+    /// <summary>번들 읽기가 실패해서 자동 갱신을 다시 예약한 횟수. 스크립트가 파일을 쓰는
+    /// 중이면 몇십 ms 뒤엔 성공하지만, id 중복 같은 제작 실수는 몇 번을 시도해도 그대로라
+    /// 무한 재시도가 되지 않게 상한을 둔다.</summary>
+    private int _presetSyncRetries;
+    private const int MaxPresetSyncRetries = 3;
 
     /// <summary>data/presets(번들 축 풀·컨셉 팩)의 변경을 감지해 자동으로 다시 읽는다. 예전엔
     /// JSON을 스크립트로 고칠 때마다 "⟳ 프리셋 갱신"을 손으로 눌러야 했다 — 이 병합 로직
@@ -136,6 +154,17 @@ public sealed partial class MainViewModel : ObservableObject
     public void SavePools() => PoolStore.Save(Pools, AppPaths.PoolsFile);
     public void SaveRecipeLibrary() => RecipeLibraryStore.Save(SavedRecipes, AppPaths.RecipesFile);
 
+    /// <summary>seededIds(=한 번이라도 번들에서 주입한 id) 조회용 캐시. 라이브러리 목록을
+    /// 채울 때 레시피마다 조회하므로 List.Contains(O(n))로 두면 700×200번 훑게 된다.
+    /// 시딩/갱신으로 목록이 바뀌면 무효화한다.</summary>
+    private HashSet<string>? _seededIdLookup;
+
+    /// <summary>이 항목이 프로그램 제공(번들) 팩에서 온 것인지. 라이브러리에 남아 있는 번들
+    /// 항목은 프리셋 갱신 때 최신 내용으로 덮어써지므로, 앱 안에서 고친 내용은 보존되지 않는다.</summary>
+    public bool IsBundled(string id) =>
+        !string.IsNullOrEmpty(id)
+        && (_seededIdLookup ??= new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal)).Contains(id);
+
     /// <summary>번들 프리셋(축 풀·컨셉 팩)을 최신 내용으로 갱신한다.
     /// 시딩은 "한 번만"이라 프로그램 업데이트로 기존 팩의 태그가 보강돼도, 앱을 재시작하기
     /// 전까지는 아직 한 번도 시딩되지 않은 새 팩도 사용자 데이터엔 반영되지 않는다.
@@ -146,9 +175,9 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void SyncBundledPresets()
     {
-        if (!TryLoadBundled(out var bundledPools, out var bundledRecipes))
+        if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out var error))
         {
-            System.Windows.MessageBox.Show("번들 프리셋을 찾을 수 없습니다.", "프리셋 갱신",
+            System.Windows.MessageBox.Show(error, "프리셋 갱신",
                 System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Warning);
             return;
         }
@@ -162,7 +191,7 @@ public sealed partial class MainViewModel : ObservableObject
             "프리셋 갱신", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Question);
         if (ok != System.Windows.MessageBoxResult.OK) return;
 
-        ApplyBundledSync(bundledPools, bundledRecipes);
+        ApplyBundledSync(bundled);
         System.Windows.MessageBox.Show(Status, "프리셋 갱신",
             System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
     }
@@ -174,34 +203,41 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private void QuickSyncBundledPresets()
     {
-        if (!TryLoadBundled(out var bundledPools, out var bundledRecipes))
+        if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out var error))
         {
-            Status = "프리셋 갱신 실패 — 번들 프리셋을 찾을 수 없습니다.";
+            // 워처가 "쓰는 중"인 파일을 잡은 경우가 대부분이라, 조금 뒤 한 번 더 시도한다.
+            // 계속 실패하면(예: id 중복 같은 제작 실수) 재시도를 멈추고 이유를 남긴다.
+            if (_presetSyncRetries < MaxPresetSyncRetries)
+            {
+                _presetSyncRetries++;
+                _presetSyncDebounce?.Start();
+                Status = $"프리셋 갱신 재시도 중({_presetSyncRetries}/{MaxPresetSyncRetries})… {error}";
+                return;
+            }
+            Status = "프리셋 갱신 실패 — " + error;
             return;
         }
-        ApplyBundledSync(bundledPools, bundledRecipes);
-    }
-
-    private static bool TryLoadBundled(out List<Pool> pools, out List<Recipe> recipes)
-    {
-        pools = PoolStore.Load(AppPaths.PresetPoolsFile);
-        recipes = RecipeLibraryStore.Load(AppPaths.PresetRecipesDir);
-        return pools.Count > 0 || recipes.Count > 0;
+        _presetSyncRetries = 0;
+        ApplyBundledSync(bundled);
     }
 
     /// <summary>Seed+SyncBundled 실행, 화면 갱신, Status 문구 설정까지 — 확인/완료 UI는 호출부 책임.</summary>
-    private void ApplyBundledSync(List<Pool> bundledPools, List<Recipe> bundledRecipes)
+    private void ApplyBundledSync(BundledPresets bundled)
     {
         var seeded = new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal);
-        var added = PresetSeeder.Seed(Pools, bundledPools, SavedRecipes, bundledRecipes, seeded);
-        if (added)
-            Settings.SeededPresetIds = seeded.ToList();
-        var (updated, removed) = PresetSeeder.SyncBundled(Pools, bundledPools, SavedRecipes, bundledRecipes, seeded);
+        var added = PresetSeeder.Seed(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
+        var (updated, removed) = PresetSeeder.SyncBundled(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
         if (added || updated > 0 || removed > 0)
         {
-            if (added) SettingsStore.Save(Settings);
+            // 데이터 먼저, 장부(seededIds)는 맨 마지막 — CommitSeeding과 같은 이유.
             SavePools();
             SaveRecipeLibrary();
+            if (added)
+            {
+                Settings.SeededPresetIds = seeded.ToList();
+                _seededIdLookup = null;
+                SettingsStore.Save(Settings);
+            }
             // 화면이 옛 객체를 들고 있으면 창을 닫을 때 그 사본이 되쓰여 갱신이 무효가 된다.
             // (뷰모델은 InitializeAsync 뒤에야 생기므로 null 가드)
             RecipeBuilder?.RefreshPools();
@@ -214,7 +250,7 @@ public sealed partial class MainViewModel : ObservableObject
             var loadedId = RecipeBuilder?.LoadedRecipeId;
             if (!string.IsNullOrEmpty(loadedId))
             {
-                var fresh = bundledRecipes.FirstOrDefault(r => r.Id == loadedId);
+                var fresh = bundled.Recipes.FirstOrDefault(r => r.Id == loadedId);
                 if (fresh != null) RecipeBuilder!.LoadRecipe(fresh);
             }
         }

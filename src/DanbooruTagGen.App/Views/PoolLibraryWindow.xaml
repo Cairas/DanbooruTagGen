@@ -27,6 +27,10 @@
         </DockPanel>
         <DockPanel Grid.Column="1">
             <TextBox DockPanel.Dock="Top" Text="{Binding SelectedPool.Name, UpdateSourceTrigger=PropertyChanged}"/>
+            <!-- 역참조: 이 풀을 쓰는 레시피. 풀을 고치거나 지울 때 영향 범위가 안 보이던 문제. -->
+            <TextBlock DockPanel.Dock="Top" Text="{Binding SelectedPoolUsage}" Margin="0,2,0,0"
+                       Foreground="#555" FontSize="11" TextWrapping="Wrap"
+                       Visibility="{Binding SelectedPoolUsage, Converter={StaticResource NonEmptyToVis}}"/>
             <Button DockPanel.Dock="Bottom" Content="선택 태그 제거" Command="{Binding RemoveSelectedTagCommand}"/>
             <ListBox ItemsSource="{Binding SelectedPoolCandidates}" SelectedItem="{Binding SelectedCandidate}" Margin="0,4"
                      HorizontalContentAlignment="Stretch">

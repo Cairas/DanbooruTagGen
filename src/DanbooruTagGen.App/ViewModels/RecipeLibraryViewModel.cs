@@ -22,11 +22,16 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     /// 조용히 비활성화되고 직접 타이핑은 그대로 동작한다.</summary>
     private readonly TagDatabase? _tagDb;
 
-    public SlotPreviewViewModel(Slot slot, IReadOnlyList<Pool> pools, TagDatabase? tagDb = null)
+    /// <summary>이 미리보기에서 태그를 고칠 때마다 불린다. 번들 팩을 앱 안에서 고치면 다음
+    /// 프리셋 갱신 때 덮어써지므로, 그 사실을 고치는 순간 알려 주려고 라이브러리가 건다.</summary>
+    private readonly Action? _onEdited;
+
+    public SlotPreviewViewModel(Slot slot, IReadOnlyList<Pool> pools, TagDatabase? tagDb = null, Action? onEdited = null)
     {
         _slot = slot;
         _pools = pools;
         _tagDb = tagDb;
+        _onEdited = onEdited;
         InlineTags = slot switch
         {
             FixedSlot f => f.Tags,
@@ -113,6 +118,7 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     {
         InlineTags.Remove(tag);
         RefreshHeader();
+        _onEdited?.Invoke();
     }
 
     [RelayCommand]
@@ -125,6 +131,7 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
         Suggestions.Clear();
         OnPropertyChanged(nameof(HasSuggestions));
         RefreshHeader();
+        _onEdited?.Invoke();
     }
 }
 
@@ -186,6 +193,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
             OnPropertyChanged();
             _main.SaveRecipeLibrary();
             _main.Generation.RefreshBatchRecipes();
+            WarnIfBundled();
         }
     }
 
@@ -223,7 +231,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         if (SelectedRecipe == null) return;
 
         foreach (var slot in SelectedRecipe.Slots)
-            SelectedRecipePreview.Add(new SlotPreviewViewModel(slot, ResolveSlotPools(slot), _main.TagDb));
+            SelectedRecipePreview.Add(new SlotPreviewViewModel(slot, ResolveSlotPools(slot), _main.TagDb, WarnIfBundled));
     }
 
     /// <summary>슬롯이 참조하는 풀들을 전부 모은다(PoolId 하나 + 체이닝된 ExtraPoolIds).
@@ -243,6 +251,16 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
             if (p != null) result.Add(p);
         }
         return result;
+    }
+
+    /// <summary>번들(제공) 팩을 앱 안에서 고쳤을 때 경고한다. 예전엔 아무 표시 없이 고쳐졌다가
+    /// 다음 프리셋 갱신 때 조용히 원복돼, 사용자 입장에선 "고친 게 사라졌다"로만 보였다
+    /// (워처 자동 갱신이 생기면서 버튼을 누르지 않아도 일어난다).</summary>
+    private void WarnIfBundled()
+    {
+        if (SelectedRecipe == null || !_main.IsBundled(SelectedRecipe.Id)) return;
+        _main.Status = $"📦 '{SelectedRecipe.Name}'은 제공 팩입니다 — 이 수정은 다음 프리셋 갱신 때 덮어써집니다. "
+                     + "계속 남기려면 '복제'로 사본을 만들어 고치세요.";
     }
 
     [RelayCommand]
@@ -395,6 +413,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         {
             r.ConflictBadge = ComputeConflictBadge(r);
             r.VarietyBadge = ComputeVarietyBadge(r, poolsById);
+            r.OriginBadge = _main.IsBundled(r.Id) ? "📦" : "";
         }
     }
 

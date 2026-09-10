@@ -65,4 +65,31 @@ public class JsonStoreTests
             File.Delete(path + ".bak");
         }
     }
+
+    [Fact]
+    public async Task LoadOrDefaultRetriesWhileFileIsBrieflyLocked()
+    {
+        // FileSystemWatcher가 "쓰는 중"인 파일을 읽으러 들어오는 실제 경로의 회귀 테스트.
+        // 예전엔 IOException이 그대로 위로 새어 앱 시작/프리셋 자동 갱신이 통째로 죽었다.
+        var path = Path.Combine(Path.GetTempPath(), $"locked_{Guid.NewGuid():N}.json");
+        JsonStore.SaveAtomic(new Sample("written", 7), path);
+
+        var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
+        var unlock = Task.Run(async () =>
+        {
+            await Task.Delay(120);   // 재시도 창(3회 × 80ms) 안에서 잠금이 풀린다
+            stream.Dispose();
+        });
+        try
+        {
+            var result = JsonStore.LoadOrDefault(path, new Sample("fallback", 0));
+            Assert.Equal("written", result.Name);
+        }
+        finally
+        {
+            await unlock;
+            stream.Dispose();
+            File.Delete(path);
+        }
+    }
 }

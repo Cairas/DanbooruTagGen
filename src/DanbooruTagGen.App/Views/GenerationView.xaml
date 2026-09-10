@@ -57,9 +57,15 @@
                 <RowDefinition Height="1*"/>
             </Grid.RowDefinitions>
 
+            <!-- 생성은 백그라운드에서 돈다(레시피 수십 개 × 수백 줄이면 몇 초). 도는 동안
+                 버튼은 자동으로 비활성이고, 진행률과 취소 버튼이 그 자리에 나타난다. -->
             <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,4">
                 <Button Content="미리보기" Command="{Binding PreviewCommand}"/>
                 <Button Content="생성" Command="{Binding GenerateCommand}" Margin="8,0,0,0" FontWeight="Bold"/>
+                <Button Content="■ 취소" Command="{Binding CancelCommand}" Margin="8,0,0,0"
+                        Visibility="{Binding ProgressText, Converter={StaticResource NonEmptyToVis}}"/>
+                <TextBlock Text="{Binding ProgressText}" Margin="8,0,0,0" FontSize="11"
+                           Foreground="#555" VerticalAlignment="Center"/>
             </StackPanel>
 
             <!-- 결과 모순 리포트: 모순 줄이 있으면 빨간 박스로 표시 -->

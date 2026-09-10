@@ -286,4 +286,36 @@ public class PresetSeederTests
         Assert.Same(legacyPool, userPools[0]);
         Assert.Equal("legacy-pool", userPools[0].Id);
     }
+
+    [Fact]
+    public void TwoBundledRecipesWithSameNameBothGetInstalled()
+    {
+        // 이름이 같은 번들 팩이 둘이면, 예전엔 뒤엣것이 "이미 있는 이름"으로 걸러져
+        // 추가되지 않는데도 시딩됨으로 기록돼 영영 안 들어왔다(장부에만 남는 유령).
+        var userRecipes = new List<Recipe>();
+        var seeded = new HashSet<string>();
+
+        PresetSeeder.Seed(
+            new List<Pool>(), Array.Empty<Pool>(),
+            userRecipes, new[] { BundledRecipe("r1", "같은 이름"), BundledRecipe("r2", "같은 이름") }, seeded);
+
+        Assert.Equal(new[] { "r1", "r2" }, userRecipes.Select(r => r.Id));
+    }
+
+    [Fact]
+    public void LegacyCopyWithSameNameIsAdoptedInsteadOfDuplicated()
+    {
+        // 반대로 id 도입 전 설치된 사본(번들 id가 아닌 것)이 같은 이름으로 있으면
+        // 이미 설치된 것으로 보고 중복 추가하지 않는다(기존 동작 유지).
+        var legacy = new Recipe { Id = "legacy-guid", Name = "온천 여행" };
+        var userRecipes = new List<Recipe> { legacy };
+        var seeded = new HashSet<string>();
+
+        PresetSeeder.Seed(
+            new List<Pool>(), Array.Empty<Pool>(),
+            userRecipes, new[] { BundledRecipe("preset-r-s002", "온천 여행") }, seeded);
+
+        Assert.Single(userRecipes);
+        Assert.Contains("preset-r-s002", seeded);
+    }
 }

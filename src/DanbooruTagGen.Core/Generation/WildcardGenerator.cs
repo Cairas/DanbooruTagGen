@@ -5,6 +5,9 @@ namespace DanbooruTagGen.Core.Generation;
 public sealed class WildcardGenerator
 {
     private const int MaxDedupeRetries = 50;
+    /// <summary>진행률을 보고하는 간격(줄). 매 줄 보고하면 UI 스레드로 넘어가는 알림이
+    /// 생성 자체보다 비싸진다.</summary>
+    private const int ProgressChunk = 25;
 
     public static void Validate(Recipe recipe, IReadOnlyDictionary<string, Pool> poolsById)
     {
@@ -62,13 +65,20 @@ public sealed class WildcardGenerator
         }
     }
 
+    /// <param name="progress">완성된 줄 수를 보고한다(백그라운드 실행 시 진행률 표시용).
+    /// 줄마다 호출하면 알림이 폭주하므로 <see cref="ProgressChunk"/>줄마다 한 번만 보고한다.</param>
+    /// <param name="cancellationToken">사용자가 생성을 중단하면 <see cref="OperationCanceledException"/>.
+    /// 레시피 수십 개 × 수백 줄이면 수 초가 걸려, 중간에 그만둘 방법이 필요하다.</param>
     public GenerationResult Generate(
         Recipe recipe,
         IReadOnlyDictionary<string, Pool> poolsById,
         GenerationOptions options,
         ConflictRules? conflicts = null,
-        ITagLookup? tagInfo = null)
+        ITagLookup? tagInfo = null,
+        IProgress<int>? progress = null,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         Validate(recipe, poolsById);
 
         var rules = conflicts ?? ConflictRules.Empty;
@@ -108,6 +118,9 @@ public sealed class WildcardGenerator
 
         for (int i = 0; i < options.LineCount; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (progress != null && i % ProgressChunk == 0) progress.Report(i);
+
             var parts = NextParts();
             var tags = parts.Select(p => p.Tag).ToList();
             string line = Render(parts);
@@ -149,6 +162,7 @@ public sealed class WildcardGenerator
             lines.Add(line);
         }
 
+        progress?.Report(lines.Count);
         return new GenerationResult(lines, warnings) { Conflicts = lineConflicts };
     }
 

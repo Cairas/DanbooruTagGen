@@ -201,4 +201,20 @@ public class WildcardGeneratorTests
         var line = gen.GenerateLine(recipe, Pools(), new GenerationOptions(), new FakeRandomSource());
         Assert.Equal("1girl", line);
     }
+
+    [Fact]
+    public void GenerateStopsWhenCancelled()
+    {
+        // 227팩 × 100줄을 UI 스레드에서 통째로 돌리던 걸 백그라운드로 옮기면서, 사용자가
+        // 중간에 그만둘 수 있어야 한다 — 생성기가 취소 신호를 실제로 본다는 계약.
+        var recipe = new Recipe { Slots = { new FixedSlot { Tags = { "1girl" } } } };
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        Assert.Throws<OperationCanceledException>(() =>
+            new WildcardGenerator().Generate(
+                recipe, new Dictionary<string, Pool>(),
+                new GenerationOptions { LineCount = 100_000 },
+                cancellationToken: cts.Token));
+    }
 }

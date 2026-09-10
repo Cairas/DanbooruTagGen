@@ -6,6 +6,7 @@ using DanbooruTagGen.App.Services;
 using DanbooruTagGen.Core.Generation;
 using DanbooruTagGen.Core.Models;
 using DanbooruTagGen.Core.Output;
+using DanbooruTagGen.Core.Persistence;
 
 namespace DanbooruTagGen.App.ViewModels;
 
@@ -92,6 +93,8 @@ public sealed partial class GenerationViewModel : ObservableObject
     [ObservableProperty] private string _outputPath = "";
     [ObservableProperty] private string _previewText = "";
     [ObservableProperty] private string _conflictReport = "";
+    /// <summary>백그라운드 생성 진행률("1,200/22,700줄 (5%)"). 비어 있으면 진행 중이 아니다.</summary>
+    [ObservableProperty] private string _progressText = "";
 
     public WriteMode[] Modes { get; } = { WriteMode.New, WriteMode.Overwrite, WriteMode.Append };
 
@@ -228,44 +231,88 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// "정말 매번 다른 시드로 도는지" 눈으로 확인할 수 있게 한다.</summary>
     private int _lastSeedUsed;
 
-    private GenerationResult Run(int lineCount)
+    /// <summary>백그라운드로 넘길 작업 스냅샷. 슬롯·풀은 ObservableCollection이라 생성이
+    /// 도는 동안 빌더나 라이브러리 창에서 태그를 고치면 백그라운드 읽기와 겹쳐 깨진다 —
+    /// JSON 왕복으로 깊은 복사를 떠서 넘긴다(체크한 레시피만 복사하므로 비용이 제한적).</summary>
+    private sealed record GenerationJob(
+        IReadOnlyList<Recipe> Recipes,
+        IReadOnlyDictionary<string, Pool> Pools,
+        GenerationOptions Options,
+        int LineCountEach,
+        int Seed);
+
+    private static Recipe Clone(Recipe recipe) =>
+        System.Text.Json.JsonSerializer.Deserialize<Recipe>(
+            System.Text.Json.JsonSerializer.Serialize(recipe, JsonStore.Options), JsonStore.Options)!;
+
+    /// <summary>UI 스레드에서만 할 수 있는 일(슬롯·체크 상태·풀 읽기, 시드 확정)을 먼저 끝내
+    /// 백그라운드가 건드릴 게 없는 스냅샷으로 만든다.</summary>
+    private GenerationJob BuildJob(int lineCountEach)
     {
-        var recipe = _main.RecipeBuilder.BuildRecipe();
-        var pools = _main.Pools.ToDictionary(p => p.Id);
         var opts = BuildOptions();
-        opts.LineCount = lineCount;
-        // 시드를 비워뒀으면(자동) 여기서 직접 하나 뽑아 opts에 못박는다 — SystemRandomSource에
-        // null을 넘기면 내부에서 알아서 뽑긴 하지만 그 값을 밖에서 확인할 방법이 없어진다.
+        // 시드를 비워뒀으면(자동) 여기서 직접 하나 뽑아 못박는다 — SystemRandomSource에 null을
+        // 넘기면 내부에서 알아서 뽑긴 하지만 그 값을 밖에서 확인할 방법이 없어진다.
         _lastSeedUsed = opts.Seed ?? Random.Shared.Next();
-        opts.Seed = _lastSeedUsed;
-        return _generator.Generate(recipe, pools, opts, _main.Conflicts, _main.TagInfo);
+        var recipes = IsMultiRecipeMode
+            ? BatchItems.Where(b => b.IsChecked).Select(b => Clone(b.Recipe)).ToList()
+            : new List<Recipe> { Clone(_main.RecipeBuilder.BuildRecipe()) };
+        return new GenerationJob(recipes, _main.Pools.ToDictionary(p => p.Id), opts, lineCountEach, _lastSeedUsed);
     }
 
-    /// <summary>체크된 레시피마다 lineCountEach줄씩 순서대로 뽑아 하나로 잇는다(레시피별로
-    /// 묶여 나오도록 — 랜덤 셔플 아님). 레시피마다 시드를 base+순번으로 달리해 서로 다른
-    /// 레시피가 완전히 같은 난수 시퀀스를 타지 않게 한다. 모순 줄 인덱스는 이어붙인 뒤의
-    /// 전체 위치로 보정한다.</summary>
-    private GenerationResult RunMulti(int lineCountEach)
+    /// <summary>레시피마다 lineCountEach줄씩 순서대로 뽑아 하나로 잇는다(레시피별로 묶여
+    /// 나오도록 — 랜덤 셔플 아님). 레시피마다 시드를 base+순번으로 달리해 서로 다른 레시피가
+    /// 완전히 같은 난수 시퀀스를 타지 않게 한다. 모순 줄 인덱스는 이어붙인 뒤의 전체 위치로
+    /// 보정한다. UI를 전혀 건드리지 않으므로 백그라운드 스레드에서 그대로 돌 수 있다.</summary>
+    private GenerationResult RunJob(GenerationJob job, IProgress<int> progress, CancellationToken token)
     {
-        var checkedItems = BatchItems.Where(b => b.IsChecked).ToList();
-        var pools = _main.Pools.ToDictionary(p => p.Id);
-        var baseOpts = BuildOptions();
-        _lastSeedUsed = baseOpts.Seed ?? Random.Shared.Next();
-
         var lines = new List<string>();
         var warnings = new List<string>();
         var conflicts = new List<LineConflict>();
-        for (int i = 0; i < checkedItems.Count; i++)
+        int done = 0;
+
+        for (int i = 0; i < job.Recipes.Count; i++)
         {
-            var opts = BuildOptions();
-            opts.LineCount = lineCountEach;
-            opts.Seed = _lastSeedUsed + i;
-            var result = _generator.Generate(checkedItems[i].Recipe, pools, opts, _main.Conflicts, _main.TagInfo);
-            foreach (var c in result.Conflicts) conflicts.Add(c with { LineIndex = c.LineIndex + lines.Count });
+            var opts = CopyWith(job.Options, job.LineCountEach, unchecked(job.Seed + i));
+            int offset = lines.Count;
+            int completedBefore = done;
+            var inner = new Progress<int>(n => progress.Report(completedBefore + n));
+
+            var result = _generator.Generate(job.Recipes[i], job.Pools, opts, _main.Conflicts, _main.TagInfo, inner, token);
+
+            foreach (var c in result.Conflicts) conflicts.Add(c with { LineIndex = c.LineIndex + offset });
             lines.AddRange(result.Lines);
-            foreach (var w in result.Warnings) warnings.Add($"[{checkedItems[i].Recipe.Name}] {w}");
+            foreach (var w in result.Warnings)
+                warnings.Add(job.Recipes.Count > 1 ? $"[{job.Recipes[i].Name}] {w}" : w);
+            done += result.Lines.Count;
         }
+
         return new GenerationResult(lines, warnings) { Conflicts = conflicts };
+    }
+
+    /// <summary>줄 수와 시드만 바꾼 사본. 백그라운드에서 뷰모델 속성을 다시 읽지 않으려고
+    /// 스냅샷의 값만으로 만든다.</summary>
+    private static GenerationOptions CopyWith(GenerationOptions o, int lineCount, int seed) => new()
+    {
+        LineCount = lineCount,
+        Seed = seed,
+        DedupeWithinLine = o.DedupeWithinLine,
+        AvoidDuplicateLines = o.AvoidDuplicateLines,
+        AvoidConflicts = o.AvoidConflicts,
+        UnderscoreToSpace = o.UnderscoreToSpace,
+        Sampling = o.Sampling,
+        AutoOrderTags = o.AutoOrderTags,
+        Blocklist = o.Blocklist,
+    };
+
+    /// <summary>스냅샷을 백그라운드에서 돌리고 진행률을 UI로 보고한다. 예전엔 생성이 UI
+    /// 스레드에서 통째로 돌아, 레시피 수십 개 × 수백 줄이면 창이 몇 초씩 응답하지 않았다.</summary>
+    private async Task<GenerationResult> RunInBackgroundAsync(GenerationJob job, CancellationToken token)
+    {
+        long total = (long)job.Recipes.Count * job.LineCountEach;
+        // Progress<T>는 만들어진 스레드(여기선 UI)의 컨텍스트로 콜백을 돌려준다.
+        var progress = new Progress<int>(n =>
+            ProgressText = total > 0 ? $"{n:N0}/{total:N0}줄 ({n * 100 / total}%)" : "");
+        return await Task.Run(() => RunJob(job, progress, token), token);
     }
 
     /// <summary>QualityTagsEnabled가 켜져 있으면 QualityTagsText를 매 줄 맨 앞에 붙인다.
@@ -314,37 +361,54 @@ public sealed partial class GenerationViewModel : ObservableObject
         return true;
     }
 
+    /// <summary>돌고 있는 쪽(미리보기든 생성이든)을 중단한다. 둘 다 같은 진행률 표시를 쓰므로
+    /// 버튼도 하나로 합쳤다.</summary>
     [RelayCommand]
-    private void Preview()
+    private void Cancel()
+    {
+        if (PreviewCommand.CanBeCanceled) PreviewCommand.Cancel();
+        if (GenerateCommand.CanBeCanceled) GenerateCommand.Cancel();
+    }
+
+    [RelayCommand]
+    private async Task Preview(CancellationToken token)
     {
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = ApplyQualityTags(IsMultiRecipeMode ? RunMulti(Math.Min(20, LineCount)) : Run(Math.Min(20, LineCount)));
+            var result = ApplyQualityTags(await RunInBackgroundAsync(BuildJob(Math.Min(20, LineCount)), token));
             PreviewText = string.Join("\n", result.Lines);
             ConflictReport = BuildConflictReport(result);
             var seedNote = $"(시드 {_lastSeedUsed})";
             _main.Status = (result.Warnings.Count > 0 ? string.Join(" / ", result.Warnings) : "미리보기 완료") + " " + seedNote;
         }
+        catch (OperationCanceledException) { _main.Status = "미리보기 취소됨"; }
         catch (GenerationValidationException ex) { _main.Status = "검증 오류: " + ex.Message; }
+        finally { ProgressText = ""; }
     }
 
     [RelayCommand]
-    private void Generate()
+    private async Task Generate(CancellationToken token)
     {
         if (string.IsNullOrWhiteSpace(OutputPath)) { _main.Status = "출력 경로를 지정하세요."; return; }
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = ApplyQualityTags(IsMultiRecipeMode ? RunMulti(LineCount) : Run(LineCount));
-            WildcardWriter.Write(OutputPath, result.Lines, Mode, InsertBlankLine);
+            var result = ApplyQualityTags(await RunInBackgroundAsync(BuildJob(LineCount), token));
+
+            // 파일 쓰기도 백그라운드로. 취소된 뒤엔 아예 쓰지 않는다(파일은 그대로 남는다).
+            var (path, mode, blank) = (OutputPath, Mode, InsertBlankLine);
+            await Task.Run(() => WildcardWriter.Write(path, result.Lines, mode, blank), token);
+
             _main.Settings.LastOutputDir = Path.GetDirectoryName(OutputPath) ?? "";
             SaveSettings();
             ConflictReport = BuildConflictReport(result);
             _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {OutputPath} (시드 {_lastSeedUsed})"
                 + (result.Warnings.Count > 0 ? " (" + string.Join(", ", result.Warnings) + ")" : "");
         }
+        catch (OperationCanceledException) { _main.Status = "생성 취소됨 — 파일은 건드리지 않았습니다."; }
         catch (GenerationValidationException ex) { _main.Status = "검증 오류: " + ex.Message; }
         catch (IOException ex) { _main.Status = "파일 오류: " + ex.Message; }
+        finally { ProgressText = ""; }
     }
 }

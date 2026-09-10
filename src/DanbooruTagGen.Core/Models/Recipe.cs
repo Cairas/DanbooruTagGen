@@ -28,4 +28,10 @@ public sealed class Recipe
     /// ("🔸조합수", ""=충분함). ConflictBadge와 같은 이유로 저장하지 않는 계산값.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string VarietyBadge { get; set; } = "";
+
+    /// <summary>프로그램 제공(번들) 팩이면 "📦". 번들 팩을 앱 안에서 고쳐도 다음 프리셋
+    /// 갱신 때 덮어써지므로, 고치기 전에 그 사실이 보여야 한다. 위 두 배지와 같은 이유로
+    /// 저장하지 않는 계산값.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string OriginBadge { get; set; } = "";
 }

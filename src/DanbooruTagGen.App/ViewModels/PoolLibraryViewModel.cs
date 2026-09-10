@@ -26,7 +26,25 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
         Pools = new ObservableCollection<Pool>(main.Pools);
     }
 
-    partial void OnSelectedPoolChanged(Pool? value) => RefreshSelectedPoolCandidates();
+    /// <summary>선택한 풀을 쓰는 레시피 목록 안내("이 풀을 지우면 무엇이 깨지는가").
+    /// 풀 공유가 이 프로그램의 핵심 구조인데 영향 범위가 화면에 전혀 안 보였다.</summary>
+    [ObservableProperty] private string _selectedPoolUsage = "";
+
+    partial void OnSelectedPoolChanged(Pool? value)
+    {
+        RefreshSelectedPoolCandidates();
+        RefreshSelectedPoolUsage();
+    }
+
+    private void RefreshSelectedPoolUsage()
+    {
+        if (SelectedPool == null) { SelectedPoolUsage = ""; return; }
+        var users = PoolReferences.FindRecipesUsing(SelectedPool.Id, _main.SavedRecipes);
+        SelectedPoolUsage = users.Count == 0
+            ? "이 풀을 참조하는 레시피 없음"
+            : $"레시피 {users.Count}개가 참조 중: {string.Join(", ", users.Take(6))}"
+              + (users.Count > 6 ? $" …외 {users.Count - 6}개" : "");
+    }
 
     /// <summary>선택 풀의 후보 문자열 목록을 태그 DB 조회로 다시 채운다. 풀을 바꿀 때뿐 아니라
     /// 태그를 추가/삭제한 뒤에도 호출해 툴팁 목록을 동기화한다.</summary>
@@ -87,8 +105,18 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
         if (SelectedPool == null) return;
         var name = SelectedPool.Name;
         var count = SelectedPool.Candidates.Count;
+
+        // 참조하는 레시피가 있으면 그 레시피들은 다음 생성 때 "참조하는 풀을 찾을 수 없습니다"로
+        // 막힌다. 지우기 전에 무엇이 깨지는지 눈으로 보여 준다.
+        var users = PoolReferences.FindRecipesUsing(SelectedPool.Id, _main.SavedRecipes);
+        var warning = users.Count == 0
+            ? ""
+            : $"\n\n⚠ 이 풀을 참조하는 레시피 {users.Count}개가 생성 불가 상태가 됩니다:\n· "
+              + string.Join("\n· ", users.Take(10))
+              + (users.Count > 10 ? $"\n· …외 {users.Count - 10}개" : "");
+
         var confirm = System.Windows.MessageBox.Show(
-            $"풀 '{name}' ({count}개 태그)를 삭제할까요? 되돌릴 수 없습니다.",
+            $"풀 '{name}' ({count}개 태그)를 삭제할까요? 되돌릴 수 없습니다.{warning}",
             "풀 삭제", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
         if (confirm != System.Windows.MessageBoxResult.Yes) return;
 

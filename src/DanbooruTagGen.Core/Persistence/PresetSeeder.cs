@@ -32,11 +32,18 @@ public static class PresetSeeder
                 userPools.Add(pool);
         }
 
+        // 이름이 같은 사본을 "이미 설치됨"으로 볼 때 번들 팩끼리의 동명이인은 빼야 한다.
+        // 그러지 않으면 이름이 겹치는 두 번째 번들 팩이 첫 번째에 가려 추가되지 않는데도
+        // 시딩됨으로 기록돼, 재시작해도 영영 안 들어오는 유령이 된다.
+        var bundledRecipeIds = bundledRecipes.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
         foreach (var recipe in bundledRecipes)
         {
             if (!seededIds.Add(recipe.Id)) continue;
             changed = true;
-            if (userRecipes.All(u => u.Id != recipe.Id && u.Name != recipe.Name))
+            bool alreadyInstalled =
+                userRecipes.Any(u => u.Id == recipe.Id)
+                || userRecipes.Any(u => u.Name == recipe.Name && !bundledRecipeIds.Contains(u.Id));
+            if (!alreadyInstalled)
                 userRecipes.Add(recipe);
         }
 

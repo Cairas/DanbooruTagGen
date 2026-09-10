@@ -61,6 +61,9 @@
                 <ListBox.ItemTemplate>
                     <DataTemplate>
                         <StackPanel Orientation="Horizontal">
+                            <!-- 📦 = 프로그램 제공(번들) 팩. 여기서 고쳐도 다음 프리셋 갱신 때 덮어써진다. -->
+                            <TextBlock Text="{Binding OriginBadge}" Width="18"
+                                       ToolTip="📦 제공 팩 — 앱에서 고친 내용은 프리셋 갱신 때 덮어써집니다(사본을 만들어 고치세요)"/>
                             <TextBlock Text="{Binding ConflictBadge}" Foreground="#B71C1C" FontWeight="Bold"
                                        Width="16" ToolTip="⚠ 풀 후보까지 포함하면 모순 가능 / ‼ 고정 태그끼리 항상 모순"/>
                             <TextBlock Text="{Binding VarietyBadge}" Foreground="#E65100" FontWeight="Bold"
