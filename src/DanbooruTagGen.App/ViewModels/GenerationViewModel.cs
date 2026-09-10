@@ -95,6 +95,9 @@ public sealed partial class GenerationViewModel : ObservableObject
     [ObservableProperty] private string _conflictReport = "";
     /// <summary>백그라운드 생성 진행률("1,200/22,700줄 (5%)"). 비어 있으면 진행 중이 아니다.</summary>
     [ObservableProperty] private string _progressText = "";
+    /// <summary>일괄 생성 결과를 한 파일로 잇지 않고 레시피마다 따로 쓴다(출력 경로의 폴더에
+    /// "레시피 이름.txt"). ComfyUI에서 컨셉별로 __와일드카드__를 부르려면 팩당 파일이 필요하다.</summary>
+    [ObservableProperty] private bool _splitFilesPerRecipe;
 
     public WriteMode[] Modes { get; } = { WriteMode.New, WriteMode.Overwrite, WriteMode.Append };
 
@@ -192,6 +195,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         AutoOrderTags = s.AutoOrderTags;
         QualityTagsEnabled = s.QualityTagsEnabled;
         QualityTagsText = s.QualityTagsText;
+        SplitFilesPerRecipe = s.SplitFilesPerRecipe;
     }
 
     /// <summary>현재 생성 탭 설정을 Settings에 담아 디스크에 저장한다.
@@ -211,6 +215,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         s.AutoOrderTags = AutoOrderTags;
         s.QualityTagsEnabled = QualityTagsEnabled;
         s.QualityTagsText = QualityTagsText;
+        s.SplitFilesPerRecipe = SplitFilesPerRecipe;
         SettingsStore.Save(s);
     }
 
@@ -259,31 +264,48 @@ public sealed partial class GenerationViewModel : ObservableObject
         return new GenerationJob(recipes, _main.Pools.ToDictionary(p => p.Id), opts, lineCountEach, _lastSeedUsed);
     }
 
-    /// <summary>레시피마다 lineCountEach줄씩 순서대로 뽑아 하나로 잇는다(레시피별로 묶여
-    /// 나오도록 — 랜덤 셔플 아님). 레시피마다 시드를 base+순번으로 달리해 서로 다른 레시피가
-    /// 완전히 같은 난수 시퀀스를 타지 않게 한다. 모순 줄 인덱스는 이어붙인 뒤의 전체 위치로
-    /// 보정한다. UI를 전혀 건드리지 않으므로 백그라운드 스레드에서 그대로 돌 수 있다.</summary>
-    private GenerationResult RunJob(GenerationJob job, IProgress<int> progress, CancellationToken token)
+    /// <summary>레시피 하나의 생성 결과(어느 레시피가 뽑았는지 함께). 레시피별 파일 분리
+    /// 출력이 "어느 파일에 무엇을 쓸지" 알려면 합치기 전 단위가 남아 있어야 한다.</summary>
+    private sealed record RecipeOutput(Recipe Recipe, GenerationResult Result);
+
+    /// <summary>레시피마다 lineCountEach줄씩 뽑는다. 레시피마다 시드를 base+순번으로 달리해
+    /// 서로 다른 레시피가 완전히 같은 난수 시퀀스를 타지 않게 한다. UI를 전혀 건드리지
+    /// 않으므로 백그라운드 스레드에서 그대로 돈다.</summary>
+    private List<RecipeOutput> RunJob(GenerationJob job, IProgress<int> progress, CancellationToken token)
     {
-        var lines = new List<string>();
-        var warnings = new List<string>();
-        var conflicts = new List<LineConflict>();
+        var outputs = new List<RecipeOutput>(job.Recipes.Count);
         int done = 0;
 
         for (int i = 0; i < job.Recipes.Count; i++)
         {
             var opts = CopyWith(job.Options, job.LineCountEach, unchecked(job.Seed + i));
-            int offset = lines.Count;
             int completedBefore = done;
             var inner = new Progress<int>(n => progress.Report(completedBefore + n));
 
             var result = _generator.Generate(job.Recipes[i], job.Pools, opts, _main.Conflicts, _main.TagInfo, inner, token);
 
-            foreach (var c in result.Conflicts) conflicts.Add(c with { LineIndex = c.LineIndex + offset });
-            lines.AddRange(result.Lines);
-            foreach (var w in result.Warnings)
-                warnings.Add(job.Recipes.Count > 1 ? $"[{job.Recipes[i].Name}] {w}" : w);
+            outputs.Add(new RecipeOutput(job.Recipes[i], result));
             done += result.Lines.Count;
+        }
+
+        return outputs;
+    }
+
+    /// <summary>레시피별 결과를 한 덩어리로 잇는다(레시피별로 묶여 순서대로 — 랜덤 셔플 아님).
+    /// 모순 줄 인덱스는 이어붙인 뒤의 전체 위치로 보정하고, 경고에는 어느 레시피인지 붙인다.</summary>
+    private static GenerationResult Merge(IReadOnlyList<RecipeOutput> outputs)
+    {
+        var lines = new List<string>();
+        var warnings = new List<string>();
+        var conflicts = new List<LineConflict>();
+
+        foreach (var o in outputs)
+        {
+            int offset = lines.Count;
+            foreach (var c in o.Result.Conflicts) conflicts.Add(c with { LineIndex = c.LineIndex + offset });
+            lines.AddRange(o.Result.Lines);
+            foreach (var w in o.Result.Warnings)
+                warnings.Add(outputs.Count > 1 ? $"[{o.Recipe.Name}] {w}" : w);
         }
 
         return new GenerationResult(lines, warnings) { Conflicts = conflicts };
@@ -306,7 +328,7 @@ public sealed partial class GenerationViewModel : ObservableObject
 
     /// <summary>스냅샷을 백그라운드에서 돌리고 진행률을 UI로 보고한다. 예전엔 생성이 UI
     /// 스레드에서 통째로 돌아, 레시피 수십 개 × 수백 줄이면 창이 몇 초씩 응답하지 않았다.</summary>
-    private async Task<GenerationResult> RunInBackgroundAsync(GenerationJob job, CancellationToken token)
+    private async Task<List<RecipeOutput>> RunInBackgroundAsync(GenerationJob job, CancellationToken token)
     {
         long total = (long)job.Recipes.Count * job.LineCountEach;
         // Progress<T>는 만들어진 스레드(여기선 UI)의 컨텍스트로 콜백을 돌려준다.
@@ -376,7 +398,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = ApplyQualityTags(await RunInBackgroundAsync(BuildJob(Math.Min(20, LineCount)), token));
+            var result = ApplyQualityTags(Merge(await RunInBackgroundAsync(BuildJob(Math.Min(20, LineCount)), token)));
             PreviewText = string.Join("\n", result.Lines);
             ConflictReport = BuildConflictReport(result);
             var seedNote = $"(시드 {_lastSeedUsed})";
@@ -394,16 +416,39 @@ public sealed partial class GenerationViewModel : ObservableObject
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = ApplyQualityTags(await RunInBackgroundAsync(BuildJob(LineCount), token));
+            var outputs = await RunInBackgroundAsync(BuildJob(LineCount), token);
+            var result = ApplyQualityTags(Merge(outputs));
 
             // 파일 쓰기도 백그라운드로. 취소된 뒤엔 아예 쓰지 않는다(파일은 그대로 남는다).
             var (path, mode, blank) = (OutputPath, Mode, InsertBlankLine);
-            await Task.Run(() => WildcardWriter.Write(path, result.Lines, mode, blank), token);
+            string where;
+            if (SplitFilesPerRecipe && IsMultiRecipeMode)
+            {
+                var folder = Path.GetDirectoryName(path) ?? "";
+                var names = WildcardWriter.ToFileNames(outputs.Select(o => (o.Recipe.Name, o.Recipe.Id)));
+                var files = outputs.Select((o, i) =>
+                    (Path: Path.Combine(folder, names[i] + ".txt"),
+                     Lines: ApplyQualityTags(o.Result).Lines)).ToList();
+                await Task.Run(() =>
+                {
+                    foreach (var f in files)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        WildcardWriter.Write(f.Path, f.Lines, mode, blank);
+                    }
+                }, token);
+                where = $"{files.Count}개 파일 → {folder}";
+            }
+            else
+            {
+                await Task.Run(() => WildcardWriter.Write(path, result.Lines, mode, blank), token);
+                where = path;
+            }
 
             _main.Settings.LastOutputDir = Path.GetDirectoryName(OutputPath) ?? "";
             SaveSettings();
             ConflictReport = BuildConflictReport(result);
-            _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {OutputPath} (시드 {_lastSeedUsed})"
+            _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {where} (시드 {_lastSeedUsed})"
                 + (result.Warnings.Count > 0 ? " (" + string.Join(", ", result.Warnings) + ")" : "");
         }
         catch (OperationCanceledException) { _main.Status = "생성 취소됨 — 파일은 건드리지 않았습니다."; }

@@ -50,6 +50,12 @@
              그 공간을 체크리스트가 차지한다. 이 패널(우측)엔 설정·미리보기·생성 결과만 남는다. -->
         <CheckBox DockPanel.Dock="Top" Content="여러 레시피 일괄 생성" Margin="0,0,0,4"
                   IsChecked="{Binding IsMultiRecipeMode}"/>
+        <!-- 레시피별 파일 분리: ComfyUI에서 컨셉마다 __와일드카드__로 부르려면 팩당 파일이
+             필요하다. 일괄 생성 모드에서만 의미가 있으므로 그때만 보인다. -->
+        <CheckBox DockPanel.Dock="Top" Content="레시피별로 파일 나누기" Margin="14,0,0,4"
+                  IsChecked="{Binding SplitFilesPerRecipe}"
+                  Visibility="{Binding IsMultiRecipeMode, Converter={StaticResource BoolToVis}}"
+                  ToolTip="위 '파일' 경로의 폴더에 '레시피 이름.txt'로 팩마다 하나씩 씁니다(이름이 겹치면 -2를 붙임)."/>
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>

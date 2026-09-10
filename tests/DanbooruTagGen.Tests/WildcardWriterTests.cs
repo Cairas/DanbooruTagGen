@@ -96,4 +96,55 @@ public class WildcardWriterTests
         }
         finally { File.Delete(path); }
     }
+
+    // ── 레시피별 파일 분리 출력용 파일명 만들기 ──────────────────────────
+
+    [Fact]
+    public void KeepsRecipeNameAsIsWhenItIsAlreadyAValidFileName()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("🔞 요바이 (들키면 안 되는 밤)", "id1") });
+
+        Assert.Equal("🔞 요바이 (들키면 안 되는 밤)", names[0]);
+    }
+
+    [Fact]
+    public void RemovesCharactersWindowsForbidsInFileNames()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("a/b:c*d?e\"f<g>h|i", "id1") });
+
+        Assert.Equal("abcdefghi", names[0]);
+    }
+
+    [Fact]
+    public void TrimsTrailingDotsAndSpacesThatWindowsCannotStore()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("이름... ", "id1") });
+
+        Assert.Equal("이름", names[0]);
+    }
+
+    [Fact]
+    public void FallsBackToTheRecipeIdWhenNothingIsLeft()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("///", "preset-r-n415") });
+
+        Assert.Equal("preset-r-n415", names[0]);
+    }
+
+    [Fact]
+    public void MakesDuplicateNamesUniqueSoTheyDoNotOverwriteEachOther()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("촉수", "a"), ("촉수", "b"), ("촉수", "c") });
+
+        Assert.Equal(new[] { "촉수", "촉수-2", "촉수-3" }, names);
+    }
+
+    [Fact]
+    public void TreatsNamesDifferingOnlyInCaseAsDuplicates()
+    {
+        // 윈도우 파일 시스템은 대소문자를 구분하지 않는다 — 구분해서 세면 한쪽이 조용히 덮인다.
+        var names = WildcardWriter.ToFileNames(new[] { ("Tentacle", "a"), ("tentacle", "b") });
+
+        Assert.Equal(new[] { "Tentacle", "tentacle-2" }, names);
+    }
 }

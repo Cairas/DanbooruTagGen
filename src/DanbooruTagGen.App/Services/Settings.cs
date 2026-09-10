@@ -22,6 +22,9 @@ public sealed class Settings
     public bool UnderscoreToSpace { get; set; } = true;
     public bool WeightedSampling { get; set; }
     public bool AutoOrderTags { get; set; }
+    /// <summary>일괄 생성을 레시피마다 별도 파일로 쓸지(출력 경로의 폴더에 "레시피 이름.txt").
+    /// 기본 꺼짐 — 예전처럼 한 파일로 이어붙인다.</summary>
+    public bool SplitFilesPerRecipe { get; set; }
 
     /// <summary>매 줄 맨 앞에 품질/안전 등급 태그를 붙일지. 기본 꺼짐 — 이미 자기만의
     /// 품질 태그를 ComfyUI 쪽에서 따로 쓰는 사용자를 위한 옵트인. 이 기능이 있는 이유는
