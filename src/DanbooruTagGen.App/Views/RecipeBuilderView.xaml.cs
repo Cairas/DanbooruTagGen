@@ -216,8 +216,8 @@ public partial class RecipeBuilderView : System.Windows.Controls.UserControl
         {
             if (dep is System.Windows.FrameworkElement el && el.DataContext is DanbooruTagGen.Core.Models.AlternativeGroup group)
             {
-                group.Tags.Remove(tag);
-                if (DataContext is ViewModels.RecipeBuilderViewModel vm) vm.RefreshConflicts();
+                // VM 경로로 지운다 — 되돌리기 스택에 남기려면 뷰모델을 거쳐야 한다.
+                if (DataContext is ViewModels.RecipeBuilderViewModel vm) vm.RemoveTagFromGroup(group, tag);
                 return;
             }
             dep = System.Windows.Media.VisualTreeHelper.GetParent(dep);

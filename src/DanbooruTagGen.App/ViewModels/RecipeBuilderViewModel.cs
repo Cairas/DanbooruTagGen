@@ -27,6 +27,41 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     /// (2026-08-26: 퀵갱신을 눌러도 이미 빌더에 열어 둔 내용은 안 바뀌던 문제의 원인).</summary>
     public string? LoadedRecipeId { get; private set; }
     public ObservableCollection<Slot> Slots { get; } = new();
+
+    /// <summary>파괴적 편집(삭제·구성 교체)의 되돌리기 스택. 되돌릴 게 없으면 버튼이 꺼진다.</summary>
+    private readonly Core.Models.RecipeEditHistory _history = new();
+    public bool CanUndo => _history.CanUndo;
+    /// <summary>되돌리기 버튼 툴팁 — 다음에 무엇이 되돌아오는지 이름으로 보여준다.</summary>
+    public string UndoTooltip => _history.NextLabel is { } label
+        ? $"되돌리기 (Ctrl+Z): {label}"
+        : "되돌릴 편집이 없습니다";
+
+    /// <summary>삭제/교체 지점마다 "되돌리는 법"을 등록한다. 되돌리는 도중에 일어난 컬렉션
+    /// 변경은 RecipeEditHistory가 알아서 무시하므로 여기서 따로 막지 않아도 된다.</summary>
+    private void Record(string label, Action undo)
+    {
+        _history.Push(label, undo);
+        NotifyUndoState();
+    }
+
+    private void NotifyUndoState()
+    {
+        OnPropertyChanged(nameof(CanUndo));
+        OnPropertyChanged(nameof(UndoTooltip));
+        UndoCommand.NotifyCanExecuteChanged();
+    }
+
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo()
+    {
+        var label = _history.Undo();
+        NotifyUndoState();
+        if (label != null)
+        {
+            RefreshConflicts();
+            _main.Status = "되돌림: " + label;
+        }
+    }
     public IReadOnlyList<Pool> Pools => _main.Pools;
     /// <summary>태그 칩 호버 툴팁이 설명/카테고리/빈도를 조회하는 데 쓴다.</summary>
     public Core.Generation.ITagLookup? TagInfo => _main.TagInfo;
@@ -267,6 +302,20 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
 
     public Recipe BuildRecipe() => new() { Name = "Untitled", Slots = Slots.ToList() };
 
+    /// <summary>바깥에서 슬롯 구성을 통째로 갈아엎기 직전에 부른다(컨셉 빌더 위저드).
+    /// 지금 구성을 되돌리기 스택에 넣어 두어, 실수로 눌러도 편집 중이던 내용을 되찾을 수 있게 한다.</summary>
+    public void RecordSlotsBeforeReplace(string label)
+    {
+        var previous = Slots.ToList();
+        if (previous.Count == 0) return;
+        Record($"{label} (이전 구성 {previous.Count}슬롯)", () =>
+        {
+            Slots.Clear();
+            foreach (var slot in previous) Slots.Add(slot);
+            SelectedSlot = Slots.FirstOrDefault();
+        });
+    }
+
     /// <summary>레시피를 빌더에 통째로 불러온다(현재 슬롯 구성 교체) — 라이브러리의 "불러오기"와
     /// 퀵갱신 뒤 자동 재적재가 공유하는 경로. JSON 왕복으로 깊은 복사해 원본 Recipe 객체를
     /// 안 건드린다. <see cref="LoadedRecipeId"/>를 기록해 두면, 이 레시피가 나중에 번들 갱신으로
@@ -275,6 +324,17 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     {
         var json = JsonSerializer.Serialize(recipe, JsonStore.Options);
         var copy = JsonSerializer.Deserialize<Recipe>(json, JsonStore.Options)!;
+        // 교체 직전 구성을 통째로 기억해 둔다 — "불러오기"는 지금까지 되돌릴 수 없는 채로
+        // 편집 중이던 내용을 전부 날렸다.
+        var previous = Slots.ToList();
+        if (previous.Count > 0)
+            Record($"'{recipe.Name}' 불러오기 (이전 구성 {previous.Count}슬롯)", () =>
+            {
+                Slots.Clear();
+                foreach (var s in previous) Slots.Add(s);
+                SelectedSlot = Slots.FirstOrDefault();
+                LoadedRecipeId = null;
+            });
         Slots.Clear();
         foreach (var slot in copy.Slots) Slots.Add(slot);
         SelectedSlot = Slots.FirstOrDefault();
@@ -357,11 +417,13 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
             RandomPoolSlot r => r.Tags,
             _ => null
         };
-        if (tags != null && tags.Remove(tag))
-        {
-            RefreshConflicts();
-            _main.Status = $"'{tag}' 제거됨";
-        }
+        if (tags == null) return;
+        int index = tags.IndexOf(tag);
+        if (index < 0) return;
+        tags.RemoveAt(index);
+        Record($"태그 '{tag}' 삭제", () => tags.Insert(Math.Min(index, tags.Count), tag));
+        RefreshConflicts();
+        _main.Status = $"'{tag}' 제거됨 — 되돌리려면 ↶(Ctrl+Z)";
     }
 
     [RelayCommand]
@@ -407,9 +469,24 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     /// <summary>대안 그룹 하나를 통째로 제거한다(그 안의 태그도 함께).</summary>
     public void RemoveAlternativeGroup(AlternativeSlot slot, AlternativeGroup group)
     {
+        int index = slot.Groups.IndexOf(group);
         slot.Groups.Remove(group);
+        Record($"그룹 '{group.Label}' 삭제",
+            () => slot.Groups.Insert(Math.Min(Math.Max(index, 0), slot.Groups.Count), group));
         RefreshConflicts();
-        _main.Status = "그룹 삭제됨";
+        _main.Status = "그룹 삭제됨 — 되돌리려면 ↶(Ctrl+Z)";
+    }
+
+    /// <summary>대안 그룹 안의 태그 하나 제거(코드비하인드의 칩 클릭이 호출). 슬롯 태그와
+    /// 달리 그룹 단위라 전용 경로가 필요하다.</summary>
+    public void RemoveTagFromGroup(AlternativeGroup group, string tag)
+    {
+        int index = group.Tags.IndexOf(tag);
+        if (index < 0) return;
+        group.Tags.RemoveAt(index);
+        Record($"태그 '{tag}' 삭제", () => group.Tags.Insert(Math.Min(index, group.Tags.Count), tag));
+        RefreshConflicts();
+        _main.Status = $"'{tag}' 제거됨 — 되돌리려면 ↶(Ctrl+Z)";
     }
 
     /// <summary>대안 그룹 하나에 태그를 추가한다(콤마로 여러 개 가능). Tags 컬렉션 변경은
@@ -446,11 +523,24 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     {
         if (SelectedSlot != null)
         {
-            Slots.Remove(SelectedSlot);
+            var slot = SelectedSlot;
+            int index = Slots.IndexOf(slot);
+            Slots.Remove(slot);
+            // 슬롯 객체를 그대로 들고 있으므로 되돌리면 안의 태그까지 통째로 살아난다.
+            Record($"슬롯 '{SlotName(slot)}' 삭제", () =>
+            {
+                Slots.Insert(Math.Min(index, Slots.Count), slot);
+                SelectedSlot = slot;
+            });
             RefreshConflicts();
-            _main.Status = "슬롯 삭제됨";
+            _main.Status = "슬롯 삭제됨 — 되돌리려면 ↶(Ctrl+Z)";
         }
     }
+
+    /// <summary>라벨이 비어 있으면 종류 이름으로 대신 부른다(되돌리기 안내 문구용).</summary>
+    private static string SlotName(Slot slot) =>
+        !string.IsNullOrWhiteSpace(slot.Label) ? slot.Label
+        : slot switch { FixedSlot => "고정", RandomPoolSlot => "랜덤", AlternativeSlot => "대안", _ => "슬롯" };
 
     [RelayCommand]
     private void MoveUp()
