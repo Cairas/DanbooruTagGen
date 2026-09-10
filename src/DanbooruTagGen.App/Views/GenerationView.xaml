@@ -70,6 +70,9 @@
                 <Button Content="생성" Command="{Binding GenerateCommand}" Margin="8,0,0,0" FontWeight="Bold"/>
                 <Button Content="■ 취소" Command="{Binding CancelCommand}" Margin="8,0,0,0"
                         Visibility="{Binding ProgressText, Converter={StaticResource NonEmptyToVis}}"/>
+                <Button Content="📋 복사" Command="{Binding CopyPreviewCommand}" Margin="8,0,0,0"
+                        Visibility="{Binding PreviewText, Converter={StaticResource NonEmptyToVis}}"
+                        ToolTip="미리보기 내용을 클립보드로 복사합니다."/>
                 <TextBlock Text="{Binding ProgressText}" Margin="8,0,0,0" FontSize="11"
                            Foreground="#555" VerticalAlignment="Center"/>
             </StackPanel>
@@ -83,9 +86,14 @@
                 </ScrollViewer>
             </Border>
 
-            <TextBox Grid.Row="2" Text="{Binding PreviewText, Mode=OneWay}" IsReadOnly="True"
-                     Margin="0,4,0,0"
-                     VerticalScrollBarVisibility="Auto" AcceptsReturn="True" FontFamily="Consolas"/>
+            <DockPanel Grid.Row="2" Margin="0,4,0,0">
+                <!-- 줄 길이 예산(guide.md 24~27태그) — 넘으면 뒤쪽 태그가 밀려 반영이 약해진다. -->
+                <TextBlock DockPanel.Dock="Bottom" Text="{Binding LineStatsText}" FontSize="11"
+                           Foreground="#555" Margin="0,3,0,0" TextWrapping="Wrap"
+                           Visibility="{Binding LineStatsText, Converter={StaticResource NonEmptyToVis}}"/>
+                <TextBox Text="{Binding PreviewText, Mode=OneWay}" IsReadOnly="True"
+                         VerticalScrollBarVisibility="Auto" AcceptsReturn="True" FontFamily="Consolas"/>
+            </DockPanel>
         </Grid>
     </DockPanel>
 </UserControl>

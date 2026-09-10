@@ -402,7 +402,7 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         var pool = new Pool { Name = name };
         foreach (var t in tags) pool.Candidates.Add(t);
         _main.Pools.Add(pool);
-        _main.PoolLibrary.Pools.Add(pool);   // 라이브러리 창 목록과 동기화
+        _main.PoolLibrary.AddExistingPool(pool);   // 라이브러리 창 목록(및 검색 필터)과 동기화
         _main.SavePools();
         RefreshPools();
         _main.Status = $"풀 '{name}' 저장됨 ({pool.Candidates.Count}개) → 풀 라이브러리";

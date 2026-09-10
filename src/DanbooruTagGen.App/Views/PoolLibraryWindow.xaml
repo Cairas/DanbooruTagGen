@@ -22,7 +22,12 @@
                 <Button Content="[고정] 슬롯으로 레시피에 추가" Margin="0,4,0,0" Command="{Binding AddAsFixedSlotCommand}"
                         ToolTip="선택한 풀의 태그 전부를 레시피 빌더에 [고정] 슬롯으로 복사합니다(매 줄 항상 전부 출력)."/>
             </StackPanel>
-            <ListBox ItemsSource="{Binding Pools}" SelectedItem="{Binding SelectedPool}"
+            <!-- 축 풀이 95개까지 늘어 이름 나열만으론 못 찾는다. 이름에 안 걸리면 그 풀의
+                 후보 태그에서도 찾는다("이 태그 어느 축에 있더라"를 바로 확인). -->
+            <TextBox DockPanel.Dock="Top" Margin="0,4,0,0"
+                     Text="{Binding PoolSearchText, UpdateSourceTrigger=PropertyChanged}"
+                     ToolTip="풀 이름 또는 그 풀에 든 태그로 검색 (부분 일치)"/>
+            <ListBox ItemsSource="{Binding FilteredPools}" SelectedItem="{Binding SelectedPool}"
                      DisplayMemberPath="Name" Margin="0,4,0,0"/>
         </DockPanel>
         <DockPanel Grid.Column="1">

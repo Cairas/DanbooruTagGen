@@ -107,6 +107,14 @@
             </DockPanel>
             <!-- 자유 라벨(danbooru 태그 아님) — 컨셉 분류·검색용. 쉼표로 여러 개, 포커스 아웃 시 커밋.
                  일괄 생성 패널의 라벨 필터 칩이 이 값들로 채워진다. -->
+            <!-- 분류(Recipe.Category): 지금까지 필터로 쓰이기만 하고 앱에서 고칠 방법이 없어
+                 JSON을 직접 열어야 했다. 편집 가능 콤보라 새 분류도 타이핑해 넣을 수 있다. -->
+            <DockPanel DockPanel.Dock="Top" Margin="0,4,0,0">
+                <TextBlock DockPanel.Dock="Left" Text="분류: " VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
+                <ComboBox IsEditable="True" ItemsSource="{Binding EditableCategories}"
+                          Text="{Binding SelectedRecipeCategory, UpdateSourceTrigger=LostFocus}"
+                          ToolTip="이 레시피의 분류(왼쪽 드롭다운 필터에 쓰입니다). 목록에 없는 새 분류도 직접 입력할 수 있습니다."/>
+            </DockPanel>
             <DockPanel DockPanel.Dock="Top" Margin="0,4,0,0">
                 <TextBlock DockPanel.Dock="Left" Text="태그: " VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
                 <TextBox Text="{Binding SelectedRecipeLabelsText, UpdateSourceTrigger=LostFocus}"

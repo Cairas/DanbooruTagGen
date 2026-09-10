@@ -233,6 +233,32 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         }
     }
 
+    /// <summary>분류 편집 드롭다운의 후보(필터용 Categories에서 "(전체)"를 뺀 것). 편집 가능
+    /// 콤보라 목록에 없는 새 분류도 그대로 타이핑해 넣을 수 있다.</summary>
+    public ObservableCollection<string> EditableCategories { get; } = new();
+
+    /// <summary>선택 레시피의 분류(Recipe.Category) 편집 패스스루. 지금까지 이 값은 필터로
+    /// 쓰이기만 하고 앱 안에서 고칠 방법이 없어 JSON을 직접 열어야 했다. 커밋되면 즉시
+    /// 저장하고 분류 후보 목록·필터를 다시 채운다.</summary>
+    public string SelectedRecipeCategory
+    {
+        get => SelectedRecipe?.Category ?? "";
+        set
+        {
+            if (SelectedRecipe is null) return;
+            var next = (value ?? "").Trim();
+            if (SelectedRecipe.Category == next) return;
+            SelectedRecipe.Category = next;
+            OnPropertyChanged();
+            _main.SaveRecipeLibrary();
+            WarnIfBundled();
+            var keep = SelectedRecipe;
+            RefreshCategories();
+            RefreshFilter();
+            if (FilteredRecipes.Contains(keep)) SelectedRecipe = keep;
+        }
+    }
+
     public RecipeLibraryViewModel(MainViewModel main)
     {
         _main = main;
@@ -257,6 +283,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         QuickPreviewText = "";
         SelectedRecipeIsFavorite = value != null && _main.Settings.FavoriteRecipeIds.Contains(value.Id);
         OnPropertyChanged(nameof(SelectedRecipeLabelsText));
+        OnPropertyChanged(nameof(SelectedRecipeCategory));
     }
 
     /// <summary>선택 레시피의 미리보기를 다시 채운다. 풀 참조 슬롯은 풀 이름과 그 후보까지
@@ -350,6 +377,9 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
                      .Distinct().OrderBy(c => c, StringComparer.OrdinalIgnoreCase))
             Categories.Add(c);
         SelectedCategory = Categories.Contains(selected) ? selected : AllCategoriesLabel;
+
+        EditableCategories.Clear();
+        foreach (var c in Categories.Skip(1)) EditableCategories.Add(c);   // "(전체)"는 분류 이름이 아니다
     }
 
     /// <summary>선택 레시피를 즐겨찾기에 추가/제거한다. 즉시 디스크에 저장돼 재시작해도 유지된다.</summary>

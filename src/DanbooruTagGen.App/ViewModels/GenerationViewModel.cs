@@ -95,6 +95,8 @@ public sealed partial class GenerationViewModel : ObservableObject
     [ObservableProperty] private string _conflictReport = "";
     /// <summary>백그라운드 생성 진행률("1,200/22,700줄 (5%)"). 비어 있으면 진행 중이 아니다.</summary>
     [ObservableProperty] private string _progressText = "";
+    /// <summary>방금 뽑은 줄들의 길이 요약(guide.md 줄 길이 예산 24~27태그 점검용).</summary>
+    [ObservableProperty] private string _lineStatsText = "";
     /// <summary>일괄 생성 결과를 한 파일로 잇지 않고 레시피마다 따로 쓴다(출력 경로의 폴더에
     /// "레시피 이름.txt"). ComfyUI에서 컨셉별로 __와일드카드__를 부르려면 팩당 파일이 필요하다.</summary>
     [ObservableProperty] private bool _splitFilesPerRecipe;
@@ -347,6 +349,33 @@ public sealed partial class GenerationViewModel : ObservableObject
         return result with { Lines = prefixed };
     }
 
+    /// <summary>줄 길이 예산(guide.md 24~27태그) 요약을 갱신한다. 예산을 넘는 줄이 있으면
+    /// 몇 줄인지 같이 알려 준다 — 넘으면 뒤쪽 태그가 밀려 반영이 약해진다.</summary>
+    private void RefreshLineStats(GenerationResult result)
+    {
+        var stats = LineStats.Measure(result.Lines);
+        if (stats.LineCount == 0) { LineStatsText = ""; return; }
+        LineStatsText = $"줄당 태그 평균 {stats.Average} · 최소 {stats.Min} · 최대 {stats.Max}"
+            + (stats.OverBudget > 0 ? $"  ⚠ 예산({stats.Budget}) 초과 {stats.OverBudget}줄" : "");
+    }
+
+    /// <summary>미리보기 내용을 클립보드로. 읽기 전용 상자에서 드래그로 긁는 것보다 빠르다.</summary>
+    [RelayCommand]
+    private void CopyPreview()
+    {
+        if (string.IsNullOrEmpty(PreviewText)) { _main.Status = "복사할 미리보기 내용이 없습니다."; return; }
+        try
+        {
+            System.Windows.Clipboard.SetText(PreviewText);
+            _main.Status = $"미리보기 {PreviewText.Split('\n').Length}줄을 클립보드에 복사했습니다.";
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            // 다른 프로그램이 클립보드를 붙들고 있으면 실패한다 — 흔한 일이라 죽지 않게 한다.
+            _main.Status = "클립보드를 다른 프로그램이 쓰고 있어 복사하지 못했습니다. 잠시 후 다시 시도하세요.";
+        }
+    }
+
     /// <summary>결과의 모순 줄들을 사람이 읽을 요약으로. 없으면 빈 문자열.</summary>
     private static string BuildConflictReport(GenerationResult result)
     {
@@ -401,6 +430,7 @@ public sealed partial class GenerationViewModel : ObservableObject
             var result = ApplyQualityTags(Merge(await RunInBackgroundAsync(BuildJob(Math.Min(20, LineCount)), token)));
             PreviewText = string.Join("\n", result.Lines);
             ConflictReport = BuildConflictReport(result);
+            RefreshLineStats(result);
             var seedNote = $"(시드 {_lastSeedUsed})";
             _main.Status = (result.Warnings.Count > 0 ? string.Join(" / ", result.Warnings) : "미리보기 완료") + " " + seedNote;
         }
@@ -448,6 +478,7 @@ public sealed partial class GenerationViewModel : ObservableObject
             _main.Settings.LastOutputDir = Path.GetDirectoryName(OutputPath) ?? "";
             SaveSettings();
             ConflictReport = BuildConflictReport(result);
+            RefreshLineStats(result);
             _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {where} (시드 {_lastSeedUsed})"
                 + (result.Warnings.Count > 0 ? " (" + string.Join(", ", result.Warnings) + ")" : "");
         }

@@ -16,7 +16,29 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
 
     [ObservableProperty] private Pool? _selectedPool;
     [ObservableProperty] private PoolCandidateView? _selectedCandidate;
+    /// <summary>전체 풀(마스터). 추가·삭제·저장은 전부 여기에 하고, 화면 목록은 검색을 거친
+    /// FilteredPools가 담당한다.</summary>
     public ObservableCollection<Pool> Pools { get; }
+    /// <summary>검색을 통과한 표시용 목록. 축 풀이 95개까지 늘어 이름 나열만으로는 못 찾는다.</summary>
+    public ObservableCollection<Pool> FilteredPools { get; } = new();
+    /// <summary>풀 이름 검색(부분 일치). 이름에 안 걸리면 그 풀의 후보 태그에서도 찾는다 —
+    /// "이 태그 어느 축에 있더라"를 바로 확인할 수 있다.</summary>
+    [ObservableProperty] private string _poolSearchText = "";
+
+    partial void OnPoolSearchTextChanged(string value) => RefreshPoolFilter();
+
+    private void RefreshPoolFilter()
+    {
+        FilteredPools.Clear();
+        var search = PoolSearchText.Trim();
+        foreach (var p in Pools)
+            if (string.IsNullOrWhiteSpace(search)
+                || p.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+                || p.Candidates.Any(c => c.Contains(search, StringComparison.OrdinalIgnoreCase)))
+                FilteredPools.Add(p);
+
+        if (SelectedPool != null && !FilteredPools.Contains(SelectedPool)) SelectedPool = null;
+    }
     /// <summary>SelectedPool.Candidates(문자열)를 태그 DB로 보강한 표시용 목록. 호버 툴팁이 여길 바라본다.</summary>
     public ObservableCollection<PoolCandidateView> SelectedPoolCandidates { get; } = new();
 
@@ -24,6 +46,7 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
     {
         _main = main;
         Pools = new ObservableCollection<Pool>(main.Pools);
+        RefreshPoolFilter();
     }
 
     /// <summary>선택한 풀을 쓰는 레시피 목록 안내("이 풀을 지우면 무엇이 깨지는가").
@@ -94,7 +117,18 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
     {
         var p = new Pool { Name = "새 풀" };
         Pools.Add(p);
+        // 검색어가 걸려 있으면 새 풀이 필터에 안 잡혀 화면에서 사라진다 — 검색을 비워 바로 보이게 한다.
+        PoolSearchText = "";
+        RefreshPoolFilter();
         SelectedPool = p;
+    }
+
+    /// <summary>바깥(레시피 빌더의 "슬롯을 풀로 저장")에서 만든 풀을 목록에 넣는다.
+    /// Pools에 직접 Add하면 검색 필터를 거친 화면 목록에는 안 나타나므로 이 경로로 받는다.</summary>
+    public void AddExistingPool(Pool pool)
+    {
+        Pools.Add(pool);
+        RefreshPoolFilter();
     }
 
     [RelayCommand]
@@ -121,6 +155,7 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
         if (confirm != System.Windows.MessageBoxResult.Yes) return;
 
         Pools.Remove(SelectedPool);
+        RefreshPoolFilter();
         _main.Status = $"풀 '{name}' 삭제됨";
     }
 
