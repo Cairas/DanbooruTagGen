@@ -13,6 +13,31 @@
              (GenerationViewModel.SelectableRecipeItem.SearchBlob) — 예: "netorare"를 치면
              그 태그가 FixedSlot이나 풀에 들어있는 레시피가 바로 걸린다. 별도 라벨 체크박스
              UI 없이 이 한 칸으로 끝나게 한 것 — 라벨을 일일이 붙이고 골라야 하는 수고를 없앴다. -->
+        <!-- 선택 조합 프리셋: 자주 쓰는 레시피 묶음을 이름 붙여 저장해 두고 한 번에 복원한다.
+             불러올 때 사라진 레시피는 BatchSelectionResolver가 걸러 내고, 라이브러리가
+             비정상으로 보이면 정리를 보류하고 경고만 남긴다(프리셋이 통째로 날아가는 걸 막음). -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right" Content="삭제" Margin="4,0,0,0" FontSize="11" Padding="6,1"
+                    Command="{Binding DeleteBatchPresetCommand}"
+                    ToolTip="고른 프리셋을 삭제합니다."/>
+            <Button DockPanel.Dock="Right" Content="업데이트" Margin="4,0,0,0" FontSize="11" Padding="6,1"
+                    Command="{Binding UpdateBatchPresetCommand}"
+                    ToolTip="고른 프리셋의 내용을 지금 체크된 레시피들로 덮어씁니다(이름은 그대로)."/>
+            <Button DockPanel.Dock="Right" Content="불러오기" Margin="4,0,0,0" FontSize="11" Padding="6,1"
+                    Command="{Binding LoadBatchPresetCommand}"
+                    ToolTip="고른 프리셋의 레시피들을 체크합니다(기존 체크는 교체됩니다)."/>
+            <ComboBox ItemsSource="{Binding BatchPresets}" SelectedItem="{Binding SelectedBatchPreset}"
+                      DisplayMemberPath="Name" FontSize="11"
+                      ToolTip="저장해 둔 선택 조합"/>
+        </DockPanel>
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,4">
+            <Button DockPanel.Dock="Right" Content="새로 저장" Margin="4,0,0,0" FontSize="11" Padding="6,1"
+                    Command="{Binding SaveBatchPresetCommand}"
+                    ToolTip="지금 체크된 레시피들을 왼쪽 이름으로 새 프리셋에 저장합니다(검색에 가려진 체크도 포함). 기존 프리셋을 고쳐 저장하려면 위 '업데이트'를 쓰세요."/>
+            <TextBox Text="{Binding BatchPresetNameInput, UpdateSourceTrigger=PropertyChanged}" FontSize="11"
+                     ToolTip="저장할 프리셋 이름"/>
+        </DockPanel>
+
         <TextBox DockPanel.Dock="Top" Margin="0,0,0,4"
                  Text="{Binding BatchSearchText, UpdateSourceTrigger=PropertyChanged}"
                  ToolTip="레시피 이름, 태그, 축 이름으로 검색 (부분 일치) — 예: netorare, 촉수, 임신"/>
@@ -25,6 +50,11 @@
                     ToolTip="🔞가 아닌 레시피만 선택합니다(기존 선택은 해제)."/>
             <Button Content="전체 선택 해제" Command="{Binding DeselectAllBatchItemsCommand}" Margin="4,0,0,0"/>
         </StackPanel>
+
+        <!-- 일괄 생성은 검색과 무관하게 체크된 전부를 돌린다. 검색으로 가려진 체크가 있으면
+             여기서 알려 줘야 "왜 예상보다 많이 나왔지"를 막을 수 있다. -->
+        <TextBlock DockPanel.Dock="Top" Text="{Binding CheckedCountText}" Margin="0,0,0,4"
+                   FontSize="11" Foreground="#37474F"/>
 
         <ListBox ItemsSource="{Binding BatchItems}">
             <ListBox.ItemTemplate>

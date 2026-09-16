@@ -6,7 +6,8 @@
         <Grid DockPanel.Dock="Top" Margin="0,4">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
-                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
+                <!-- 11줄: 줄 수·시드·옵션 6개·훅 요약·출력·파일 -->
+                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
             </Grid.RowDefinitions>
             <TextBlock Grid.Row="0" Grid.Column="0" Text="줄 수" VerticalAlignment="Center"/>
             <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding LineCount}"/>
@@ -24,13 +25,17 @@
             <CheckBox Grid.Row="7" Grid.Column="1" IsChecked="{Binding AutoOrderTags}"
                       Content="태그 순서 자동 배치 (표준 프롬프트 순서)"
                       ToolTip="한 줄을 품질→인원→외형→의상→행위→소품→배경→형식 순으로 정렬. 미분류 태그는 원래 위치 유지."/>
-            <TextBlock Grid.Row="8" Grid.Column="0" Text="출력" VerticalAlignment="Center"/>
-            <StackPanel Grid.Row="8" Grid.Column="1" Orientation="Horizontal">
+            <!-- 훅은 별도 창에 있어 켜 둔 걸 잊기 쉽다 — 생성 직전에 항상 보이도록 여기 둔다. -->
+            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding HookSummaryText}"
+                       VerticalAlignment="Center" FontSize="11" Foreground="#37474F"
+                       ToolTip="상단 '🔗 생성 훅' 버튼에서 설정합니다."/>
+            <TextBlock Grid.Row="9" Grid.Column="0" Text="출력" VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
                 <ComboBox ItemsSource="{Binding Modes}" SelectedItem="{Binding Mode}" Width="110"/>
                 <CheckBox Content="빈 줄 띄움" IsChecked="{Binding InsertBlankLine}" Margin="8,0,0,0" VerticalAlignment="Center"/>
             </StackPanel>
-            <TextBlock Grid.Row="9" Grid.Column="0" Text="파일" VerticalAlignment="Center"/>
-            <DockPanel Grid.Row="9" Grid.Column="1">
+            <TextBlock Grid.Row="10" Grid.Column="0" Text="파일" VerticalAlignment="Center"/>
+            <DockPanel Grid.Row="10" Grid.Column="1">
                 <Button DockPanel.Dock="Right" Content="찾아보기..." Command="{Binding BrowseOutputCommand}" Margin="4,0,0,0"/>
                 <TextBox Text="{Binding OutputPath}"/>
             </DockPanel>

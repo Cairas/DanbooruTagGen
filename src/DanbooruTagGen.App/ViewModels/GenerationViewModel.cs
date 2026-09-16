@@ -71,6 +71,21 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// "netorare"/"네토라레"처럼 컨셉과 관련된 말을 치면 그 태그나 축 이름을 가진 레시피가 걸린다.</summary>
     [ObservableProperty] private string _batchSearchText = "";
 
+    /// <summary>체크된 총 개수와 그중 현재 검색에 가려진 개수. 일괄 생성은 검색과 무관하게
+    /// 체크된 전부를 돌리므로(마스터 목록 기준), 화면에 안 보이는 체크가 있다는 사실이
+    /// 사용자에게 보여야 한다 — 안 보이면 "왜 예상보다 많이 나왔지"가 된다.</summary>
+    [ObservableProperty] private string _checkedCountText = "체크 없음";
+
+    /// <summary>메인 화면에 보여 줄 훅 적용 요약. 훅은 별도 창에 있어서 켜 둔 걸 잊은 채
+    /// 생성하면 "왜 태그가 더 붙지"가 된다 — 생성 패널에서 항상 보이게 한다.</summary>
+    [ObservableProperty] private string _hookSummaryText = "훅 없음";
+
+    /// <summary>프리셋 콤보에 띄울 목록. MainViewModel.BatchPresets를 이름순으로 비춘다.</summary>
+    public ObservableCollection<BatchSelectionPreset> BatchPresets { get; } = new();
+    [ObservableProperty] private BatchSelectionPreset? _selectedBatchPreset;
+    /// <summary>"현재 선택 저장"에 쓸 이름 입력칸.</summary>
+    [ObservableProperty] private string _batchPresetNameInput = "";
+
     [ObservableProperty] private int _lineCount = 100;
     /// <summary>"-1"은 "매번 랜덤"을 뜻하는 값(빈 문자열도 같은 뜻으로 계속 받아들임).
     /// 빈 칸으로 두면 "설정을 깜빡한 건가 랜덤인 건가" 헷갈릴 수 있어, 기본값 자체를
@@ -107,8 +122,10 @@ public sealed partial class GenerationViewModel : ObservableObject
     {
         _main = main;
         LoadSettings();
-        foreach (var r in _main.SavedRecipes) _allBatchItems.Add(new SelectableRecipeItem(r));
+        foreach (var r in _main.SavedRecipes) _allBatchItems.Add(CreateBatchItem(r));
         RefreshBatchItems();
+        RefreshBatchPresets();
+        RefreshHookSummary();
     }
 
     partial void OnBatchSearchTextChanged(string value) => RefreshBatchItems();
@@ -121,7 +138,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         _allBatchItems.Clear();
         foreach (var r in _main.SavedRecipes)
         {
-            var item = new SelectableRecipeItem(r);
+            var item = CreateBatchItem(r);
             if (checkedIds.Contains(r.Id)) item.IsChecked = true;
             _allBatchItems.Add(item);
         }
@@ -142,6 +159,27 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
     /// 축 라벨·Labels)까지 훑으므로 "netorare" 같은 실제 태그명으로도 걸린다. _allBatchItems가
     /// 마스터라 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
+    /// <summary>체크 상태가 바뀔 때마다 개수 표시를 갱신해야 해서, 항목 생성을 한 곳으로 모았다.</summary>
+    private SelectableRecipeItem CreateBatchItem(Recipe recipe)
+    {
+        var item = new SelectableRecipeItem(recipe);
+        item.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(SelectableRecipeItem.IsChecked)) RefreshCheckedCount();
+        };
+        return item;
+    }
+
+    private void RefreshCheckedCount()
+    {
+        int total = _allBatchItems.Count(b => b.IsChecked);
+        int visible = BatchItems.Count(b => b.IsChecked);
+        int hidden = total - visible;
+        CheckedCountText = total == 0
+            ? "체크 없음"
+            : hidden > 0 ? $"체크 {total}개 (검색에 가려진 {hidden}개 포함)" : $"체크 {total}개";
+    }
+
     private void RefreshBatchItems()
     {
         BatchItems.Clear();
@@ -149,6 +187,8 @@ public sealed partial class GenerationViewModel : ObservableObject
         foreach (var item in _allBatchItems)
             if (string.IsNullOrWhiteSpace(search) || item.SearchBlob.Contains(search, StringComparison.OrdinalIgnoreCase))
                 BatchItems.Add(item);
+        // 가려진 개수는 검색어에 따라 달라지므로 목록을 다시 채울 때마다 계산한다.
+        RefreshCheckedCount();
     }
 
     /// <summary>현재 검색으로 걸러진 목록만 일괄 체크/해제한다(검색으로 가려진 항목은 안 건드림).</summary>
@@ -178,6 +218,165 @@ public sealed partial class GenerationViewModel : ObservableObject
     {
         foreach (var item in BatchItems)
             item.IsChecked = !item.IsPreview && item.IsNsfw == nsfw;
+    }
+
+    /// <summary>훅 창에서 변경이 있을 때 HookLibraryViewModel이 호출한다.</summary>
+    public void RefreshHookSummary()
+    {
+        int on = _main.Hooks.Count(h => h.IsEnabled);
+        HookSummaryText = on == 0 ? "훅 없음" : $"🔗 훅 {on}개 적용 중";
+    }
+
+    private void RefreshBatchPresets()
+    {
+        var previous = SelectedBatchPreset;
+        BatchPresets.Clear();
+        foreach (var p in _main.BatchPresets.OrderBy(p => p.Name, StringComparer.CurrentCulture))
+            BatchPresets.Add(p);
+        // 목록을 다시 채우면 콤보 선택이 풀린다 — 아직 살아 있는 프리셋이면 되돌려 준다.
+        if (previous != null && BatchPresets.Contains(previous)) SelectedBatchPreset = previous;
+    }
+
+    /// <summary>프리셋의 레시피들을 체크한다. 저장 이후 사라진 레시피는 BatchSelectionResolver가
+    /// 걸러 내며, 라이브러리 자체가 비정상으로 보이면 정리를 보류하고 경고만 남긴다.</summary>
+    [RelayCommand]
+    private void LoadBatchPreset()
+    {
+        if (SelectedBatchPreset is not { } preset)
+        {
+            _main.Status = "불러올 프리셋을 고르세요.";
+            return;
+        }
+
+        var resolution = BatchSelectionResolver.Resolve(preset, _main.SavedRecipes);
+
+        // 사라진 항목을 정리했거나 이름 폴백으로 id를 갱신했으면 저장한다.
+        // 안전장치가 발동한 경우 ShouldSave는 false라 프리셋 파일을 건드리지 않는다.
+        if (resolution.ShouldSave)
+        {
+            preset.Entries = resolution.Entries.ToList();
+            preset.SavedAt = DateTime.Now;
+            _main.SaveBatchPresets();
+        }
+
+        var idSet = resolution.MatchedRecipeIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var item in _allBatchItems) item.IsChecked = idSet.Contains(item.Recipe.Id);
+        IsMultiRecipeMode = true;
+        RefreshBatchItems();
+
+        if (resolution.MissingNames.Count == 0)
+        {
+            _main.Status = $"프리셋 '{preset.Name}' 불러옴 — {resolution.MatchedRecipeIds.Count}개 선택됨.";
+            return;
+        }
+
+        var names = string.Join(", ", resolution.MissingNames.Take(5))
+                    + (resolution.MissingNames.Count > 5 ? $" 외 {resolution.MissingNames.Count - 5}개" : "");
+
+        _main.Status = resolution.PruningWithheld
+            // 라이브러리가 비었거나 절반 이상이 안 맞는다 — 지금 정리하면 프리셋이 사실상 사라진다.
+            ? $"⚠ 프리셋 '{preset.Name}': {resolution.MissingNames.Count}개를 찾지 못했습니다({names}). "
+              + "라이브러리가 정상인지 확인하세요 — 프리셋은 그대로 두었습니다."
+            : $"프리셋 '{preset.Name}' 불러옴 — {resolution.MatchedRecipeIds.Count}개 선택됨. "
+              + $"사라진 {resolution.MissingNames.Count}개 정리됨: {names}";
+    }
+
+    /// <summary>지금 체크된 레시피들을 프리셋 엔트리로 만든다. 검색으로 가려진 체크도 포함한다
+    /// — 생성이 그 기준으로 도므로 저장도 같은 기준이어야 한다.</summary>
+    private List<BatchSelectionEntry> CheckedEntries() => _allBatchItems
+        .Where(b => b.IsChecked)
+        .Select(b => new BatchSelectionEntry { RecipeId = b.Recipe.Id, RecipeName = b.Recipe.Name })
+        .ToList();
+
+    /// <summary>고른 프리셋을 지금 체크된 레시피들로 덮어쓴다(이름 유지).
+    /// <para>"새로 저장"과 버튼을 나눈 이유: 하나로 합치면 이름칸을 고친 채 저장했을 때
+    /// "이름 변경"인지 "새 프리셋"인지 의도가 갈린다. 버튼이 둘이면 섞일 여지가 없다.</para></summary>
+    [RelayCommand]
+    private void UpdateBatchPreset()
+    {
+        if (SelectedBatchPreset is not { } preset)
+        {
+            _main.Status = "업데이트할 프리셋을 고르세요.";
+            return;
+        }
+
+        var entries = CheckedEntries();
+        if (entries.Count == 0)
+        {
+            _main.Status = "체크된 레시피가 없습니다. 업데이트할 선택이 없습니다.";
+            return;
+        }
+
+        // 덮어쓰면 이전 구성은 사라지므로 개수를 함께 보여 주고 확인받는다.
+        var answer = System.Windows.MessageBox.Show(
+            $"프리셋 '{preset.Name}'({preset.Entries.Count}개)을 지금 체크된 {entries.Count}개로 덮어쓸까요?",
+            "프리셋 업데이트", System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+        if (answer != System.Windows.MessageBoxResult.Yes) return;
+
+        preset.Entries = entries;
+        preset.SavedAt = DateTime.Now;
+        _main.SaveBatchPresets();
+        _main.Status = $"프리셋 '{preset.Name}' 업데이트됨 — {entries.Count}개.";
+    }
+
+    /// <summary>이름칸의 이름으로 새 프리셋을 만든다. 같은 이름이 이미 있으면 확인 후 덮어쓴다.</summary>
+    [RelayCommand]
+    private void SaveBatchPreset()
+    {
+        var name = BatchPresetNameInput.Trim();
+        if (string.IsNullOrEmpty(name))
+        {
+            _main.Status = "프리셋 이름을 입력하세요.";
+            return;
+        }
+
+        var entries = CheckedEntries();
+        if (entries.Count == 0)
+        {
+            _main.Status = "체크된 레시피가 없습니다. 저장할 선택이 없습니다.";
+            return;
+        }
+
+        var existing = _main.BatchPresets.FirstOrDefault(p => p.Name == name);
+        if (existing != null)
+        {
+            var answer = System.Windows.MessageBox.Show(
+                $"'{name}' 프리셋이 이미 있습니다. 덮어쓸까요?", "프리셋 덮어쓰기",
+                System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Question);
+            if (answer != System.Windows.MessageBoxResult.Yes) return;
+            existing.Entries = entries;
+            existing.SavedAt = DateTime.Now;
+        }
+        else
+        {
+            _main.BatchPresets.Add(new BatchSelectionPreset { Name = name, Entries = entries });
+        }
+
+        _main.SaveBatchPresets();
+        RefreshBatchPresets();
+        SelectedBatchPreset = BatchPresets.FirstOrDefault(p => p.Name == name);
+        BatchPresetNameInput = "";
+        _main.Status = $"프리셋 '{name}' 저장됨 — {entries.Count}개.";
+    }
+
+    [RelayCommand]
+    private void DeleteBatchPreset()
+    {
+        if (SelectedBatchPreset is not { } preset)
+        {
+            _main.Status = "삭제할 프리셋을 고르세요.";
+            return;
+        }
+        var answer = System.Windows.MessageBox.Show(
+            $"프리셋 '{preset.Name}'을 삭제할까요?", "프리셋 삭제",
+            System.Windows.MessageBoxButton.YesNo, System.Windows.MessageBoxImage.Warning);
+        if (answer != System.Windows.MessageBoxResult.Yes) return;
+
+        _main.BatchPresets.Remove(preset);
+        _main.SaveBatchPresets();
+        SelectedBatchPreset = null;
+        RefreshBatchPresets();
+        _main.Status = $"프리셋 '{preset.Name}' 삭제됨.";
     }
 
     /// <summary>재시작해도 생성 탭 설정(출력 경로, 줄 수, 체크박스들)이 남아있도록 저장해둔 값을 복원.
@@ -254,6 +453,10 @@ public sealed partial class GenerationViewModel : ObservableObject
 
     /// <summary>UI 스레드에서만 할 수 있는 일(슬롯·체크 상태·풀 읽기, 시드 확정)을 먼저 끝내
     /// 백그라운드가 건드릴 게 없는 스냅샷으로 만든다.</summary>
+    /// <summary>후보가 없어 건너뛴 훅의 이름들. 생성이 끝난 뒤 상태 메시지로 알린다 —
+    /// 조용히 빠지면 "훅을 켰는데 왜 안 나오지"가 된다.</summary>
+    private IReadOnlyList<string> _skippedHooks = Array.Empty<string>();
+
     private GenerationJob BuildJob(int lineCountEach)
     {
         var opts = BuildOptions();
@@ -261,10 +464,30 @@ public sealed partial class GenerationViewModel : ObservableObject
         // 넘기면 내부에서 알아서 뽑긴 하지만 그 값을 밖에서 확인할 방법이 없어진다.
         _lastSeedUsed = opts.Seed ?? Random.Shared.Next();
         var recipes = IsMultiRecipeMode
-            ? BatchItems.Where(b => b.IsChecked).Select(b => Clone(b.Recipe)).ToList()
+            // 마스터 목록을 읽는다. BatchItems는 검색어로 걸러진 표시용이라, 레시피를 체크해 둔 뒤
+            // 검색창에 무언가를 입력하면 가려진 항목이 조용히 생성에서 빠졌다(성공으로 끝나므로
+            // 눈치채기도 어려웠다). 검색은 "무엇을 보여줄지"만 정해야지 "무엇을 생성할지"를
+            // 정해서는 안 된다.
+            ? _allBatchItems.Where(b => b.IsChecked).Select(b => Clone(b.Recipe)).ToList()
             : new List<Recipe> { Clone(_main.RecipeBuilder.BuildRecipe()) };
-        return new GenerationJob(recipes, _main.Pools.ToDictionary(p => p.Id), opts, lineCountEach, _lastSeedUsed);
+
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+
+        // 훅은 복사본에만 끼운다 — 원본 레시피는 절대 건드리지 않는다. 일괄·단일 두 경로가
+        // 모두 여기를 지나므로 훅은 자동으로 양쪽(미리보기 포함)에 적용된다.
+        var hooks = _main.Hooks.Where(h => h.IsEnabled).OrderBy(h => h.Order).ToList();
+        var skipped = new List<string>();
+        foreach (var recipe in recipes)
+            foreach (var name in HookApplier.Apply(recipe, hooks, pools))
+                if (!skipped.Contains(name)) skipped.Add(name);
+        _skippedHooks = skipped;
+
+        return new GenerationJob(recipes, pools, opts, lineCountEach, _lastSeedUsed);
     }
+
+    /// <summary>후보가 없어 건너뛴 훅이 있으면 알린다.</summary>
+    private string SkippedHookNote() =>
+        _skippedHooks.Count == 0 ? "" : $" ⚠ 후보가 없어 건너뛴 훅: {string.Join(", ", _skippedHooks)}";
 
     /// <summary>레시피 하나의 생성 결과(어느 레시피가 뽑았는지 함께). 레시피별 파일 분리
     /// 출력이 "어느 파일에 무엇을 쓸지" 알려면 합치기 전 단위가 남아 있어야 한다.</summary>
@@ -407,7 +630,9 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// true를 반환하면(막혔으면) 호출부는 더 진행하지 않는다.</summary>
     private bool MultiModeBlockedWithNoSelection()
     {
-        if (!IsMultiRecipeMode || BatchItems.Any(b => b.IsChecked)) return false;
+        // BuildJob과 같은 목록을 봐야 한다 — 표시용을 보면 "검색에 가려졌을 뿐 체크는 돼 있는"
+        // 상태에서 생성이 막혀 버린다.
+        if (!IsMultiRecipeMode || _allBatchItems.Any(b => b.IsChecked)) return false;
         _main.Status = "일괄 생성할 레시피를 하나 이상 체크하세요.";
         return true;
     }
@@ -432,7 +657,8 @@ public sealed partial class GenerationViewModel : ObservableObject
             ConflictReport = BuildConflictReport(result);
             RefreshLineStats(result);
             var seedNote = $"(시드 {_lastSeedUsed})";
-            _main.Status = (result.Warnings.Count > 0 ? string.Join(" / ", result.Warnings) : "미리보기 완료") + " " + seedNote;
+            _main.Status = (result.Warnings.Count > 0 ? string.Join(" / ", result.Warnings) : "미리보기 완료")
+                + " " + seedNote + SkippedHookNote();
         }
         catch (OperationCanceledException) { _main.Status = "미리보기 취소됨"; }
         catch (GenerationValidationException ex) { _main.Status = "검증 오류: " + ex.Message; }
@@ -480,7 +706,8 @@ public sealed partial class GenerationViewModel : ObservableObject
             ConflictReport = BuildConflictReport(result);
             RefreshLineStats(result);
             _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {where} (시드 {_lastSeedUsed})"
-                + (result.Warnings.Count > 0 ? " (" + string.Join(", ", result.Warnings) + ")" : "");
+                + (result.Warnings.Count > 0 ? " (" + string.Join(", ", result.Warnings) + ")" : "")
+                + SkippedHookNote();
         }
         catch (OperationCanceledException) { _main.Status = "생성 취소됨 — 파일은 건드리지 않았습니다."; }
         catch (GenerationValidationException ex) { _main.Status = "검증 오류: " + ex.Message; }

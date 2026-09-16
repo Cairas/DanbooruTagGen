@@ -15,6 +15,8 @@
             <ToolBar>
                 <Button Content="풀 라이브러리" Command="{Binding OpenPoolLibraryCommand}" Margin="4,2"/>
                 <Button Content="레시피 라이브러리" Command="{Binding OpenRecipeLibraryCommand}" Margin="4,2"/>
+                <Button Content="🔗 생성 훅" Command="{Binding OpenHookLibraryCommand}" Margin="4,2"
+                        ToolTip="생성할 때만 레시피에 끼워 넣는 사용자 정의 슬롯을 설정합니다(레시피 자체는 안 바뀝니다)."/>
                 <Button Content="✨ 컨셉 빌더" Command="{Binding OpenConceptWizardCommand}" Margin="4,2"
                         ToolTip="테마 키워드로 관련 태그를 모아 컨셉 레시피를 자동 조립합니다."/>
                 <Separator/>

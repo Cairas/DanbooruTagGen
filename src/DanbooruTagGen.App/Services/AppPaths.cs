@@ -62,5 +62,11 @@ public static class AppPaths
     /// "마지막 작업 상태" 하나뿐이고, 이쪽은 Pool처럼 여러 개를 골라 쓸 수 있게 한다.</summary>
     public static string RecipesFile => Path.Combine(AppDataDir, "recipes.json");
 
+    /// <summary>생성 직전에 레시피에 끼워 넣는 사용자 정의 슬롯(훅) 목록.</summary>
+    public static string HooksFile => Path.Combine(AppDataDir, "hooks.json");
+
+    /// <summary>"여러 레시피 일괄 생성"에서 고른 조합을 이름 붙여 저장한 프리셋들.</summary>
+    public static string BatchPresetsFile => Path.Combine(AppDataDir, "batch-presets.json");
+
     public static void EnsureAppDataDir() => Directory.CreateDirectory(AppDataDir);
 }

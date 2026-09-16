@@ -20,6 +20,13 @@ public sealed partial class MainViewModel : ObservableObject
     /// "마지막 작업 상태" 하나짜리 자동저장(LastRecipeFile)과는 별개로, Pool처럼 여러 개를
     /// 저장해 놓고 골라 쓸 수 있게 한다.</summary>
     public List<Recipe> SavedRecipes { get; private set; } = new();
+    /// <summary>생성 직전에 레시피에 끼워 넣는 사용자 정의 슬롯들. 레시피·풀과 달리 생성할
+    /// 때만 합쳐지고 레시피 자체에는 남지 않는다.</summary>
+    public List<GenerationHook> Hooks { get; private set; } = new();
+
+    /// <summary>일괄 생성 선택 조합 프리셋. 훅과는 독립적으로 저장·불러오기한다.</summary>
+    public List<BatchSelectionPreset> BatchPresets { get; private set; } = new();
+
     /// <summary>모순 태그 규칙(상호배타 그룹). 시작 시 data/conflicts.csv에서 로드.</summary>
     public Core.Generation.ConflictRules Conflicts { get; private set; } = Core.Generation.ConflictRules.Empty;
     /// <summary>태그 빈도·그룹 메타데이터 조회. 가중 추첨/순서 자동 배치에 생성기로 주입.
@@ -33,6 +40,7 @@ public sealed partial class MainViewModel : ObservableObject
     public GenerationViewModel Generation { get; private set; } = default!;
     public PoolLibraryViewModel PoolLibrary { get; private set; } = default!;
     public RecipeLibraryViewModel RecipeLibrary { get; private set; } = default!;
+    public HookLibraryViewModel HookLibrary { get; private set; } = default!;
 
     public MainViewModel()
     {
@@ -40,6 +48,8 @@ public sealed partial class MainViewModel : ObservableObject
         Settings = SettingsStore.Load();
         Pools = PoolStore.Load(AppPaths.PoolsFile);
         SavedRecipes = RecipeLibraryStore.Load(AppPaths.RecipesFile);
+        Hooks = HookStore.Load(AppPaths.HooksFile);
+        BatchPresets = BatchPresetStore.Load(AppPaths.BatchPresetsFile);
         SeedBundledPresets();
     }
 
@@ -88,11 +98,14 @@ public sealed partial class MainViewModel : ObservableObject
         RecipeBuilder = new RecipeBuilderViewModel(this);
         RecipeLibrary = new RecipeLibraryViewModel(this);
         Generation = new GenerationViewModel(this);
+        // Generation 뒤에 만든다 — 훅 창이 생성 옵션(자동 정렬)을 읽어 경고를 띄운다.
+        HookLibrary = new HookLibraryViewModel(this);
         OnPropertyChanged(nameof(TagSearch));
         OnPropertyChanged(nameof(PoolLibrary));
         OnPropertyChanged(nameof(RecipeBuilder));
         OnPropertyChanged(nameof(RecipeLibrary));
         OnPropertyChanged(nameof(Generation));
+        OnPropertyChanged(nameof(HookLibrary));
 
         IsLoading = false;
         Status = $"태그 {db.Count:N0}개 로드됨";
@@ -153,6 +166,8 @@ public sealed partial class MainViewModel : ObservableObject
 
     public void SavePools() => PoolStore.Save(Pools, AppPaths.PoolsFile);
     public void SaveRecipeLibrary() => RecipeLibraryStore.Save(SavedRecipes, AppPaths.RecipesFile);
+    public void SaveHooks() => HookStore.Save(Hooks, AppPaths.HooksFile);
+    public void SaveBatchPresets() => BatchPresetStore.Save(BatchPresets, AppPaths.BatchPresetsFile);
 
     /// <summary>seededIds(=한 번이라도 번들에서 주입한 id) 조회용 캐시. 라이브러리 목록을
     /// 채울 때 레시피마다 조회하므로 List.Contains(O(n))로 두면 700×200번 훑게 된다.
@@ -344,6 +359,37 @@ public sealed partial class MainViewModel : ObservableObject
                 Settings.RecipeLibraryLeftPanelWidth = col.Width.Value;
             SettingsStore.Save(Settings);
             RecipeLibrary.Persist();
+        };
+        win.Show();
+    }
+
+    private Views.HookLibraryWindow? _hookLibraryWindow;
+
+    /// <summary>훅 설정 창. 풀·레시피 라이브러리와 같은 패턴 — 모달이 아니라서 창을 열어 둔 채
+    /// 미리보기를 돌려 훅 효과를 바로 확인할 수 있다.</summary>
+    [RelayCommand]
+    private void OpenHookLibrary()
+    {
+        if (_hookLibraryWindow != null)
+        {
+            _hookLibraryWindow.Activate();
+            return;
+        }
+        if (HookLibrary is null)
+        {
+            Status = "태그 데이터 로드가 끝난 뒤에 사용할 수 있습니다.";
+            return;
+        }
+
+        // 창을 열 때마다 다시 채운다 — 풀 목록이 그사이 바뀌었을 수 있고, 자동 정렬 경고도
+        // 지금의 생성 옵션 기준으로 판단해야 한다.
+        HookLibrary.Refresh();
+        var win = new Views.HookLibraryWindow { DataContext = HookLibrary, Owner = System.Windows.Application.Current.MainWindow };
+        _hookLibraryWindow = win;
+        win.Closed += (_, _) =>
+        {
+            _hookLibraryWindow = null;
+            HookLibrary.Persist();
         };
         win.Show();
     }
