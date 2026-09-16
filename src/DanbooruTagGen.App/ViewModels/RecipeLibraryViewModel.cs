@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -42,6 +43,10 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
         };
         RefreshHeader();
     }
+
+    /// <summary>부모(RecipeLibraryViewModel)가 순서 이동·삭제 때 Recipe.Slots에서 이 항목을
+    /// 찾는 데 쓴다 — 미리보기 항목은 늘 Slot과 1:1이므로 참조 동일성으로 찾으면 된다.</summary>
+    public Slot UnderlyingSlot => _slot;
 
     /// <summary>슬롯의 실제 태그 컬렉션(수정 즉시 반영).</summary>
     public System.Collections.ObjectModel.ObservableCollection<string> InlineTags { get; }
@@ -298,6 +303,119 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
             SelectedRecipePreview.Add(new SlotPreviewViewModel(slot, ResolveSlotPools(slot), _main.TagDb, WarnIfBundled));
     }
 
+    /// <summary>선택 레시피에 새 슬롯을 하나 추가하고 공통 뒷정리(미리보기·배지 갱신, 저장,
+    /// 번들 소스 되쓰기)를 한다 — 슬롯 3종(고정/랜덤 풀/대안) 추가 명령이 모두 이걸 거친다.
+    /// 태그 축(순서 조합 생성기 등)은 순서에 민감해 프롬프트 앞뒤 배치가 의미를 가지므로,
+    /// 슬롯 추가만 있고 옮기는 기능이 없으면 새로 넣은 축을 항상 맨 끝에만 둘 수밖에 없다
+    /// — 그래서 MoveSlotUp/Down도 같이 추가했다(아래).</summary>
+    private void AddSlotToSelected(Slot slot, string statusVerb)
+    {
+        if (SelectedRecipe == null)
+        {
+            _main.Status = "슬롯을 추가할 레시피를 먼저 선택하세요.";
+            return;
+        }
+        SelectedRecipe.Slots.Add(slot);
+        RebuildPreview();
+        RefreshBadges();
+        _main.SaveRecipeLibrary();
+        WarnIfBundled();
+        _main.Status = $"{statusVerb} 슬롯을 추가했습니다 — 맨 아래 펼쳐서 채우세요.";
+    }
+
+    [RelayCommand]
+    private void AddFixedSlotToSelected() =>
+        AddSlotToSelected(new FixedSlot { Label = "새 고정" }, "새 고정");
+
+    [RelayCommand]
+    private void AddRandomPoolSlotToSelected() =>
+        AddSlotToSelected(new RandomPoolSlot { Label = "새 랜덤 풀", MinCount = 0, MaxCount = 1 }, "새 랜덤 풀");
+
+    /// <summary>빈 그룹 2개로 시작(RecipeBuilderViewModel.AddAlternativeSlot과 동일 패턴) —
+    /// 그룹이 하나도 없으면 검증에서 막히고, 라이브러리 미리보기는 지금 대안 그룹 안의
+    /// 태그까지는 편집을 못 지원하니(헤더만 보임) 그룹 태그는 레시피 빌더에서 채워야 한다.</summary>
+    [RelayCommand]
+    private void AddAlternativeSlotToSelected()
+    {
+        var slot = new AlternativeSlot { Label = "새 대안" };
+        slot.Groups.Add(new AlternativeGroup { Label = "방법 A" });
+        slot.Groups.Add(new AlternativeGroup { Label = "방법 B" });
+        AddSlotToSelected(slot, "새 대안");
+    }
+
+    /// <summary>미리보기에 뜬 순서 = Recipe.Slots의 실제 순서 = 생성될 때 태그가 나열되는
+    /// 순서(TagOrdering이 분류 못 하는 미분류 태그는 원래 위치를 그대로 쓰므로, 슬롯 순서
+    /// 자체가 그 태그들의 최종 위치를 결정한다). 그래서 슬롯 추가만 되고 순서를 못 바꾸면
+    /// 항상 맨 끝에만 낄 수 있다 — 위/아래로 인접 슬롯과 맞바꾼다.</summary>
+    [RelayCommand]
+    private void MoveSlotUp(SlotPreviewViewModel item) => MoveSlotBy(item, -1);
+
+    [RelayCommand]
+    private void MoveSlotDown(SlotPreviewViewModel item) => MoveSlotBy(item, +1);
+
+    [RelayCommand]
+    private void MoveSlotToTop(SlotPreviewViewModel item) => MoveSlotTo(item, 0);
+
+    [RelayCommand]
+    private void MoveSlotToBottom(SlotPreviewViewModel item) =>
+        MoveSlotTo(item, (SelectedRecipe?.Slots.Count ?? 1) - 1);
+
+    private void MoveSlotBy(SlotPreviewViewModel item, int delta)
+    {
+        if (SelectedRecipe == null) return;
+        int i = SelectedRecipe.Slots.IndexOf(item.UnderlyingSlot);
+        if (i < 0) return;
+        MoveSlotTo(item, i + delta);
+    }
+
+    /// <summary>슬롯을 targetIndex 위치로 옮긴다(맨 위/맨 아래 버튼과 드래그 드롭이 공용으로 씀).
+    /// 범위를 벗어나면 가장 가까운 끝으로 클램프 — "맨 위" 버튼이 이미 맨 위인 슬롯에 눌려도
+    /// 조용히 무시되게.</summary>
+    private void MoveSlotTo(SlotPreviewViewModel item, int targetIndex)
+    {
+        if (SelectedRecipe == null) return;
+        var slots = SelectedRecipe.Slots;
+        int i = slots.IndexOf(item.UnderlyingSlot);
+        if (i < 0) return;
+        int j = Math.Clamp(targetIndex, 0, slots.Count - 1);
+        if (i == j) return;
+        var slot = slots[i];
+        slots.RemoveAt(i);
+        slots.Insert(j, slot);
+        RebuildPreview();
+        _main.SaveRecipeLibrary();
+        WarnIfBundled();
+    }
+
+    /// <summary>드래그 앤 드롭으로 슬롯 순서를 바꾼다. 코드비하인드(RecipeLibraryWindow.xaml.cs)가
+    /// 드래그 소스/드롭 대상의 SlotPreviewViewModel을 찾아 여기로 넘긴다 — 드래그 "중"에는
+    /// 아무것도 갱신하지 않고 "놓는 순간"에만 한 번 호출된다(매 MouseMove마다 리스트를 다시
+    /// 그리면 드래그가 심하게 끊기고 버벅여서, 드롭 시점에만 반영하도록 설계).</summary>
+    public void ReorderSlot(SlotPreviewViewModel dragged, SlotPreviewViewModel dropTarget)
+    {
+        if (SelectedRecipe == null || ReferenceEquals(dragged, dropTarget)) return;
+        int targetIndex = SelectedRecipe.Slots.IndexOf(dropTarget.UnderlyingSlot);
+        if (targetIndex < 0) return;
+        MoveSlotTo(dragged, targetIndex);
+    }
+
+    /// <summary>실수로 추가한 슬롯을 통째로 지운다. 확인창 없이 즉시 — 태그 하나 지우는 것과
+    /// 같은 급의 작업이라(RemoveTag도 확인 없음) 굳이 막지 않는다. 슬롯 자체가 아까우면
+    /// '복제'로 레시피를 먼저 통째로 백업해 두면 된다.</summary>
+    [RelayCommand]
+    private void RemoveSlotFromSelected(SlotPreviewViewModel item)
+    {
+        if (SelectedRecipe == null) return;
+        if (SelectedRecipe.Slots.Remove(item.UnderlyingSlot))
+        {
+            RebuildPreview();
+            RefreshBadges();
+            _main.SaveRecipeLibrary();
+            WarnIfBundled();
+            _main.Status = "슬롯을 삭제했습니다.";
+        }
+    }
+
     /// <summary>슬롯이 참조하는 풀들을 전부 모은다(PoolId 하나 + 체이닝된 ExtraPoolIds).
     /// 미리보기·모순 배지·NSFW 판정이 공통으로 쓴다.</summary>
     private List<Pool> ResolveSlotPools(Slot slot)
@@ -317,14 +435,36 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         return result;
     }
 
-    /// <summary>번들(제공) 팩을 앱 안에서 고쳤을 때 경고한다. 예전엔 아무 표시 없이 고쳐졌다가
-    /// 다음 프리셋 갱신 때 조용히 원복돼, 사용자 입장에선 "고친 게 사라졌다"로만 보였다
-    /// (워처 자동 갱신이 생기면서 버튼을 누르지 않아도 일어난다).</summary>
+    /// <summary>번들(제공) 팩을 앱 안에서 고쳤을 때, 그 수정을 번들 소스 파일에도 바로 되써서
+    /// 다음 프리셋 갱신 때 도로 원복되지 않게 한다. 예전엔(git으로 배포되던 시절) 다른 사용자의
+    /// 커스터마이징을 보호하려고 일부러 "번들 갱신이 항상 이김"으로 만들어 뒀는데, 지금은
+    /// 이 데이터가 git으로 배포되지 않고 로컬 1인 사용이라 그 보호가 오히려 "앱에서 고쳐도
+    /// 저장이 안 된다"는 혼란만 준다 — 그래서 소스 자체를 갱신해 워처가 같은 내용을 다시
+    /// 읽어도 결과가 그대로 유지되게 한다.
+    /// exe 옆 사본(AppPaths.PresetRecipesDir)뿐 아니라, 같은 체크아웃 안에 있으면 저장소
+    /// 원본(AppPaths.RepoSourceRecipesDir)에도 함께 쓴다 — "원본을 고쳐야" 한다는 요청 반영.
+    /// 되돌리고 싶을 때를 위해 덮어쓰기 전 기존 파일을 .bak로 남긴다(둘 다).</summary>
     private void WarnIfBundled()
     {
         if (SelectedRecipe == null || !_main.IsBundled(SelectedRecipe.Id)) return;
-        _main.Status = $"📦 '{SelectedRecipe.Name}'은 제공 팩입니다 — 이 수정은 다음 프리셋 갱신 때 덮어써집니다. "
-                     + "계속 남기려면 '복제'로 사본을 만들어 고치세요.";
+        var fileName = SelectedRecipe.Id + ".json";
+        var targets = new List<string> { Path.Combine(AppPaths.PresetRecipesDir, fileName) };
+        if (AppPaths.RepoSourceRecipesDir is { } repoDir)
+            targets.Add(Path.Combine(repoDir, fileName));
+
+        var failures = new List<string>();
+        foreach (var path in targets)
+        {
+            try
+            {
+                if (File.Exists(path)) File.Copy(path, path + ".bak", overwrite: true);
+                JsonStore.SaveAtomic(SelectedRecipe, path);
+            }
+            catch (IOException ex) { failures.Add($"{path} ({ex.Message})"); }
+        }
+        _main.Status = failures.Count == 0
+            ? $"📦 '{SelectedRecipe.Name}' 수정을 번들 소스에도 저장했습니다({targets.Count}곳, .bak 백업 남김)."
+            : $"⚠ '{SelectedRecipe.Name}' 일부 저장 실패 — {string.Join("; ", failures)}";
     }
 
     [RelayCommand]

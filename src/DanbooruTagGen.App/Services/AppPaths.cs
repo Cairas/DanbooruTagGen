@@ -29,6 +29,26 @@ public static class AppPaths
     public static string PresetPoolsFile { get; } = Path.Combine(DataDir, "presets", "pools.json");
     public static string PresetRecipesDir { get; } = Path.Combine(DataDir, "presets", "recipes");
 
+    /// <summary>개발 저장소의 원본 data/presets/recipes 폴더(있으면). exe는 보통
+    /// {repo}/src/DanbooruTagGen.App/bin/{Config}/{TFM}/ 밑에서 돌아가므로, 그 자리에서
+    /// 5단계 위로 올라가면 저장소 루트다. 이 프로젝트는 1인 로컬 개발용이라 exe 옆 사본과
+    /// 저장소 원본이 같은 체크아웃 안에 공존한다 — 번들 팩을 앱에서 직접 고치면 그 수정이
+    /// exe 옆 사본에서 끝나지 않고 저장소 원본에도 반영되도록 여기를 함께 쓴다.
+    /// 저장소 구조를 벗어난 배포 환경(패키징된 설치본 등)에서는 그 경로에 폴더가 없을 테니
+    /// null — 호출부가 있을 때만 추가로 쓴다.</summary>
+    public static string? RepoSourceRecipesDir { get; } = ResolveRepoSourceRecipesDir();
+
+    private static string? ResolveRepoSourceRecipesDir()
+    {
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath);
+        if (exeDir is null) return null;
+        // net9.0-windows -> Release/Debug -> bin -> DanbooruTagGen.App -> src -> repo root
+        var repoRoot = Directory.GetParent(exeDir)?.Parent?.Parent?.Parent?.Parent?.FullName;
+        if (repoRoot is null) return null;
+        var candidate = Path.Combine(repoRoot, "data", "presets", "recipes");
+        return Directory.Exists(candidate) ? candidate : null;
+    }
+
     public static string AppDataDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "DanbooruTagGen");
