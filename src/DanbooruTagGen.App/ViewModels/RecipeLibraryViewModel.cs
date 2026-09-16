@@ -479,7 +479,10 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     }
 
     /// <summary>SFW 팩을 먼저, NSFW 팩을 뒤에 보여준다(OrderBy는 안정 정렬이라 각 그룹
-    /// 내부의 기존 순서는 그대로 유지된다). 성인/검색/카테고리/즐겨찾기 필터를 전부 AND로 통과한 것만.</summary>
+    /// 내부의 기존 순서는 그대로 유지된다). 성인/검색/카테고리/즐겨찾기 필터를 전부 AND로 통과한 것만.
+    /// <para>"테스트" 라벨이 붙은 팩은 그보다 먼저 맨 아래로 내린다(RecipeDisplayOrder).
+    /// SFW/NSFW 묶음보다 <b>앞선</b> 키여야 한다 — 뒤에 두면 자기가 속한 묶음 안에서만
+    /// 마지막이 되어 반대편 묶음 팩들 위에 남는다. 일괄 생성 체크리스트도 같은 규칙을 쓴다.</para></summary>
     private void RefreshFilter()
     {
         FilteredRecipes.Clear();
@@ -497,7 +500,8 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
                 NsfwFilterMode.NsfwOnly => x.IsNsfw,
                 _ => true,
             })
-            .OrderBy(x => x.IsNsfw)
+            .OrderBy(x => RecipeDisplayOrder.IsPinnedToBottom(x.Recipe))
+            .ThenBy(x => x.IsNsfw)
             .Select(x => x.Recipe);
 
         foreach (var r in ordered) FilteredRecipes.Add(r);

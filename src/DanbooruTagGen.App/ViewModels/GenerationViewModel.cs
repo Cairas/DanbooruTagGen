@@ -122,7 +122,7 @@ public sealed partial class GenerationViewModel : ObservableObject
     {
         _main = main;
         LoadSettings();
-        foreach (var r in _main.SavedRecipes) _allBatchItems.Add(CreateBatchItem(r));
+        foreach (var r in OrderedRecipes()) _allBatchItems.Add(CreateBatchItem(r));
         RefreshBatchItems();
         RefreshBatchPresets();
         RefreshHookSummary();
@@ -136,7 +136,7 @@ public sealed partial class GenerationViewModel : ObservableObject
     {
         var checkedIds = _allBatchItems.Where(b => b.IsChecked).Select(b => b.Recipe.Id).ToHashSet();
         _allBatchItems.Clear();
-        foreach (var r in _main.SavedRecipes)
+        foreach (var r in OrderedRecipes())
         {
             var item = CreateBatchItem(r);
             if (checkedIds.Contains(r.Id)) item.IsChecked = true;
@@ -159,6 +159,11 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
     /// 축 라벨·Labels)까지 훑으므로 "netorare" 같은 실제 태그명으로도 걸린다. _allBatchItems가
     /// 마스터라 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
+    /// <summary>체크리스트에 뿌릴 레시피를 순서대로 준다. 레시피 라이브러리 창과 같은 규칙을
+    /// 써야 두 화면의 순서가 어긋나지 않는다 — "테스트" 라벨이 붙은 팩만 맨 아래로 내리고,
+    /// 나머지는 recipes.json 배열 순서를 그대로 둔다.</summary>
+    private IEnumerable<Recipe> OrderedRecipes() => RecipeDisplayOrder.PinnedLast(_main.SavedRecipes);
+
     /// <summary>체크 상태가 바뀔 때마다 개수 표시를 갱신해야 해서, 항목 생성을 한 곳으로 모았다.</summary>
     private SelectableRecipeItem CreateBatchItem(Recipe recipe)
     {
