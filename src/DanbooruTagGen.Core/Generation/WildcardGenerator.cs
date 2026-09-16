@@ -54,8 +54,9 @@ public sealed class WildcardGenerator
                 case AlternativeSlot alt:
                     if (alt.Groups.Count == 0)
                         throw new GenerationValidationException($"대안 슬롯 '{alt.Label}'에 그룹이 하나도 없습니다.");
-                    if (alt.Groups.Any(g => g.Tags.Count == 0))
-                        throw new GenerationValidationException($"대안 슬롯 '{alt.Label}'에 태그가 없는 그룹이 있습니다.");
+                    // 태그가 없는 그룹("없음"/"기본" 같은 무발동 분기)은 의도된 패턴이다 —
+                    // 가중치로 "아무것도 안 나올 확률"을 정밀 제어할 때 randomPool의
+                    // min/max 방식 대신 이 방식을 쓴다(n534/ztest/n535에서 이미 사용 중).
                     if (alt.Groups.Any(g => g.Weight < 0))
                         throw new GenerationValidationException($"대안 슬롯 '{alt.Label}'에 가중치가 음수인 그룹이 있습니다.");
                     if (alt.Groups.Sum(g => (long)g.Weight) == 0)
