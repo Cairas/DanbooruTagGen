@@ -183,10 +183,22 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
             _main.Status = "직접 추가할 태그/문구를 먼저 입력하세요.";
             return;
         }
+        var rejected = new List<string>();
+        string? error = null;
         foreach (var piece in CustomTagInput.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (RangeError(piece) is { } err) { rejected.Add(piece); error ??= err; continue; }
             AddTagToSelectedSlot(piece);
-        CustomTagInput = "";
+        }
+        // 잘못된 조각만 입력칸에 남겨 바로 고칠 수 있게 한다.
+        CustomTagInput = string.Join(", ", rejected);
+        if (error != null) _main.Status = error;
     }
+
+    /// <summary>가중치 범위 표기((tag:1.1~1.3))가 잘못됐으면 상태 표시줄용 문구, 아니면 null.
+    /// 넣는 순간 막아야 한다 — 그냥 넣으면 저장까지 되고 생성할 때에야 검증 오류로 터진다.</summary>
+    private static string? RangeError(string piece) =>
+        Core.Generation.WeightRange.FindError(piece) is { } err ? $"'{piece}' 추가 안 됨: {err}" : null;
 
     /// <summary>현재 슬롯 구성을 디스크에 저장한다. 저장 버튼과 창 닫기 시 자동 저장 둘 다에서 호출.</summary>
     [RelayCommand]
@@ -492,17 +504,23 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     /// <summary>대안 그룹 하나에 태그를 추가한다(콤마로 여러 개 가능). Tags 컬렉션 변경은
     /// 생성자에서 건 구독(SubscribeGroup→OnSlotTagsChanged)이 이미 RefreshConflicts를 자동
     /// 호출하므로 여기서 따로 부르지 않는다 — 저빈도 경고만 직접 붙인다.</summary>
-    public void AddTagsToGroup(AlternativeGroup group, string input)
+    /// <returns>가중치 범위 표기가 잘못돼 넣지 않은 조각들(입력칸에 남겨 고치게 한다). 전부 들어갔으면 "".</returns>
+    public string AddTagsToGroup(AlternativeGroup group, string input)
     {
-        if (string.IsNullOrWhiteSpace(input)) return;
+        if (string.IsNullOrWhiteSpace(input)) return "";
         var lowFreq = "";
+        var rejected = new List<string>();
+        string? error = null;
         foreach (var piece in input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
+            if (RangeError(piece) is { } err) { rejected.Add(piece); error ??= err; continue; }
             if (group.Tags.Contains(piece)) continue;
             group.Tags.Add(piece);
             lowFreq += LowFrequencySuffix(piece);
         }
-        if (lowFreq.Length > 0) _main.Status = $"'{group.Label}'에 태그 추가됨" + lowFreq;
+        if (error != null) _main.Status = error;
+        else if (lowFreq.Length > 0) _main.Status = $"'{group.Label}'에 태그 추가됨" + lowFreq;
+        return string.Join(", ", rejected);
     }
 
     /// <summary>태그 빈도가 낮으면(guide.md의 저빈도 경계값 2000건 미만) 상태 표시줄에 덧붙일

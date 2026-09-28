@@ -63,8 +63,23 @@ public sealed class WildcardGenerator
                         throw new GenerationValidationException($"대안 슬롯 '{alt.Label}'의 모든 그룹 가중치가 0입니다. 최소 하나는 1 이상이어야 합니다.");
                     break;
             }
+
+            // 가중치 범위 표기((tag:1.1~1.3))의 오타·역순을 생성 전에 막는다. 생성 중에 만나면
+            // 원문을 그대로 흘려보낼 수밖에 없어, 잘못된 표기가 프롬프트에 섞인 줄 모르게 된다.
+            foreach (var tag in TagsOf(slot, poolsById))
+                if (WeightRange.FindError(tag) is { } rangeError)
+                    throw new GenerationValidationException($"슬롯 '{slot.Label}'의 '{tag}': {rangeError}");
         }
     }
+
+    /// <summary>슬롯이 출력할 수 있는 모든 태그 문자열(대안 슬롯은 전 그룹).</summary>
+    private static IEnumerable<string> TagsOf(Slot slot, IReadOnlyDictionary<string, Pool> poolsById) => slot switch
+    {
+        FixedSlot f => f.Tags,
+        RandomPoolSlot r => ResolveCandidates(r, poolsById),
+        AlternativeSlot alt => alt.Groups.SelectMany(g => g.Tags),
+        _ => Enumerable.Empty<string>(),
+    };
 
     /// <param name="progress">완성된 줄 수를 보고한다(백그라운드 실행 시 진행률 표시용).
     /// 줄마다 호출하면 알림이 폭주하므로 <see cref="ProgressChunk"/>줄마다 한 번만 보고한다.</param>
@@ -221,8 +236,11 @@ public sealed class WildcardGenerator
         }
         return emitted;
 
+        // 모든 슬롯(훅 포함)의 태그가 합류하는 단일 지점. 가중치 범위는 여기서, 줄마다 새로
+        // 뽑는다 — 같은 rnd를 써야 시드 재현성이 유지된다. 블록리스트/중복 판정은 치환 후 기준.
         void Add(string tag, SlotRole r)
         {
+            tag = WeightRange.Resolve(tag, rnd);
             if (blocklist.Contains(tag)) return;
             if (seenTags != null && !seenTags.Add(tag)) return;
             emitted.Add((tag, r));

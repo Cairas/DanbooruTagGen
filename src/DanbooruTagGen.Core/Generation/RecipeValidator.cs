@@ -30,8 +30,9 @@ public sealed record ValidationIssue(ValidationRule Rule, string Subject, string
 /// 전체까지). 사전에 없다고 오탈자로 몰면 검사 자체가 못 쓰게 되므로 건너뛴다.</para></summary>
 public static class RecipeValidator
 {
-    /// <summary>"(tag:1.2)" 같은 가중치 표기에서 태그 이름만 꺼내기 위한 패턴.</summary>
-    private static readonly Regex WeightSyntax = new(@"^\((?<tag>.+):[0-9.]+\)$", RegexOptions.Compiled);
+    /// <summary>"(tag:1.2)"·"(tag:1.1~1.3)" 같은 가중치 표기에서 태그 이름만 꺼내기 위한 패턴.
+    /// 범위 표기를 빼먹으면 범위를 쓴 태그 전부가 "사전에 없음"으로 오탐된다.</summary>
+    private static readonly Regex WeightSyntax = new(@"^\((?<tag>.+):[0-9.]+(?:\s*~\s*[0-9.]+)?\)$", RegexOptions.Compiled);
 
     /// <summary>상대가 <b>지금 화면에</b> 있어야 성립하는 진행 중 행위 태그.
     /// <c>tools/conflict_scan.py</c>의 NEEDS_PARTNER를 가져오되 <b>사후 흔적 태그는 뺐다</b>
@@ -153,7 +154,7 @@ public static class RecipeValidator
         return (tags, phrases);
     }
 
-    /// <summary>"(tag:1.2)"에서 태그 이름만 꺼낸다. 가중치 표기가 아니면 그대로 돌려준다.</summary>
+    /// <summary>"(tag:1.2)"·"(tag:1.1~1.3)"에서 태그 이름만 꺼낸다. 가중치 표기가 아니면 그대로 돌려준다.</summary>
     private static string Unwrap(string raw)
     {
         var s = raw.Trim();

@@ -75,6 +75,13 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     [ObservableProperty] private string _header = "";
     [ObservableProperty] private string _addTagText = "";
 
+    /// <summary>가중치 범위 표기((tag:1.1~1.3))가 잘못돼 추가하지 않은 이유. 비어 있으면 숨긴다.
+    /// 여기서 안 막으면 저장은 되고 생성할 때에야 검증 오류로 터져, 어디서 틀렸는지 찾기 어렵다.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasAddTagError))]
+    private string _addTagError = "";
+    public bool HasAddTagError => AddTagError.Length > 0;
+
     /// <summary>추가 입력칸의 자동완성 후보(최대 8개). 콤마로 여러 개를 입력하는 중이면
     /// 마지막 조각만 검색어로 쓴다 — "1girl, sm" 이라고 치는 중이면 "sm"만 검색.</summary>
     public ObservableCollection<Tag> Suggestions { get; } = new();
@@ -82,6 +89,7 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
 
     partial void OnAddTagTextChanged(string value)
     {
+        AddTagError = "";
         Suggestions.Clear();
         var lastPiece = value.Contains(',') ? value[(value.LastIndexOf(',') + 1)..].Trim() : value.Trim();
         if (_tagDb != null && lastPiece.Length > 0)
@@ -132,9 +140,21 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     private void AddTag()
     {
         if (string.IsNullOrWhiteSpace(AddTagText)) return;
+        var rejected = new List<string>();
+        string error = "";
         foreach (var piece in AddTagText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (Core.Generation.WeightRange.FindError(piece) is { } err)
+            {
+                rejected.Add(piece);
+                if (error.Length == 0) error = $"'{piece}' 추가 안 됨: {err}";
+                continue;
+            }
             if (!InlineTags.Contains(piece)) InlineTags.Add(piece);
-        AddTagText = "";
+        }
+        // 잘못된 조각만 입력칸에 남겨 바로 고칠 수 있게 한다(AddTagText 대입이 오류를 지우므로 나중에 설정).
+        AddTagText = string.Join(", ", rejected);
+        AddTagError = error;
         Suggestions.Clear();
         OnPropertyChanged(nameof(HasSuggestions));
         RefreshHeader();

@@ -29,7 +29,7 @@
             <TextBlock DockPanel.Dock="Left" Text="직접 입력: " VerticalAlignment="Center" Foreground="Gray" FontSize="11"/>
             <Button DockPanel.Dock="Right" Content="추가" Margin="4,0,0,0" Command="{Binding AddCustomTagCommand}"/>
             <TextBox Text="{Binding CustomTagInput, UpdateSourceTrigger=PropertyChanged}"
-                     ToolTip="선택한 슬롯에 그대로 추가합니다. 콤마로 여러 개 입력 가능. DB에 없는 자연어 문구도 허용.">
+                     ToolTip="선택한 슬롯에 그대로 추가합니다. 콤마로 여러 개 입력 가능. DB에 없는 자연어 문구도 허용.&#x0a;가중치: (tag:1.3) 고정 · (tag:1.1~1.3) 매 줄 범위 안에서 무작위">
                 <TextBox.InputBindings>
                     <KeyBinding Key="Enter" Command="{Binding AddCustomTagCommand}"/>
                 </TextBox.InputBindings>
@@ -285,7 +285,7 @@
                                                 <Button DockPanel.Dock="Right" Content="추가" Margin="4,0,0,0" FontSize="11"
                                                         Click="AddAlternativeGroupTag_Click"/>
                                                 <TextBox Text="{Binding PendingTagInput, UpdateSourceTrigger=PropertyChanged}" FontSize="11"
-                                                         ToolTip="이 그룹에 태그 추가(콤마로 여러 개)"
+                                                         ToolTip="이 그룹에 태그 추가(콤마로 여러 개)&#x0a;가중치: (tag:1.3) 고정 · (tag:1.1~1.3) 매 줄 범위 안에서 무작위"
                                                          KeyDown="AlternativeGroupInput_KeyDown"/>
                                             </DockPanel>
                                         </StackPanel>

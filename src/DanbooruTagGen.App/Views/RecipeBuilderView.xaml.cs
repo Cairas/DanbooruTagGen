@@ -230,8 +230,7 @@ public partial class RecipeBuilderView : System.Windows.Controls.UserControl
             && fe.DataContext is DanbooruTagGen.Core.Models.AlternativeGroup group
             && DataContext is ViewModels.RecipeBuilderViewModel vm)
         {
-            vm.AddTagsToGroup(group, group.PendingTagInput);
-            group.PendingTagInput = "";
+            group.PendingTagInput = vm.AddTagsToGroup(group, group.PendingTagInput);
         }
     }
 
@@ -242,8 +241,7 @@ public partial class RecipeBuilderView : System.Windows.Controls.UserControl
             && fe.DataContext is DanbooruTagGen.Core.Models.AlternativeGroup group
             && DataContext is ViewModels.RecipeBuilderViewModel vm)
         {
-            vm.AddTagsToGroup(group, group.PendingTagInput);
-            group.PendingTagInput = "";
+            group.PendingTagInput = vm.AddTagsToGroup(group, group.PendingTagInput);
             e.Handled = true;
         }
     }
