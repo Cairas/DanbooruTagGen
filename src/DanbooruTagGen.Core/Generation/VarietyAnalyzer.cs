@@ -13,7 +13,8 @@ public static class VarietyAnalyzer
 
     /// <summary>슬롯 하나가 만들 수 있는 서로 다른 결과의 가짓수.
     /// 고정=1, 대안=weight≠0인 그룹 수(최소 1), 랜덤 풀=Σ C(n,k) for k in [minCount,maxCount]
-    /// (n=인라인 태그+참조 풀 후보를 합쳐 중복 제거한 개수).</summary>
+    /// (n=인라인 태그+참조 풀 후보를 합쳐 중복 제거한 개수). chancePercent가 100 미만이면 "0개"
+    /// 결과를 하나 더 세고(minCount=0이면 이미 포함), 0이면 1.</summary>
     public static long SlotCardinality(Slot slot, IReadOnlyDictionary<string, Pool> poolsById)
     {
         switch (slot)
@@ -26,6 +27,7 @@ public static class VarietyAnalyzer
                 return Math.Max(live, 1);
 
             case RandomPoolSlot r:
+                if (r.ChancePercent <= 0) return 1; // 절대 발동 안 함 = 항상 빈 결과 하나
                 var candidates = new HashSet<string>(StringComparer.Ordinal);
                 foreach (var t in r.Tags) candidates.Add(t);
                 if (!string.IsNullOrEmpty(r.PoolId) && poolsById.TryGetValue(r.PoolId, out var pool))
@@ -42,6 +44,8 @@ public static class VarietyAnalyzer
 
                 long total = 0;
                 for (int k = lo; k <= hi; k++) total += Combinations(n, k);
+                // 가끔 발동 안 하면 "0개"라는 결과가 하나 더 생긴다(lo=0이면 이미 셌다).
+                if (r.ChancePercent < 100 && lo > 0) total += 1;
                 return Math.Max(total, 1);
 
             default:

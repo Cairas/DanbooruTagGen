@@ -139,8 +139,13 @@
                             <TextBox Text="{Binding MinCount}" Width="30"/>
                             <TextBlock Text=" ~ "/>
                             <TextBox Text="{Binding MaxCount}" Width="30"/>
-                            <TextBlock Text=" 개 무작위"/>
+                            <TextBlock Text=" 개 무작위 · 발동 확률 "/>
+                            <TextBox Text="{Binding ChancePercentText, UpdateSourceTrigger=PropertyChanged}" Width="34"
+                                     ToolTip="이 슬롯이 한 줄에서 아예 뜰 확률(0~100). 비워두면 100(항상).&#x0a;발동하면 위 개수만큼 뽑고, 발동 안 하면 그 줄엔 0개."/>
+                            <TextBlock Text=" %"/>
                         </StackPanel>
+                        <TextBlock Text="{Binding ChancePercentError}" Foreground="#C62828" FontSize="11" TextWrapping="Wrap"
+                                   Visibility="{Binding HasChancePercentError, Converter={StaticResource BoolToVis}}"/>
                         <!-- 풀 라이브러리에 저장해둔 풀을 이 슬롯의 후보로 불러오기. 직접 태그(Tags)와
                              여기서 고른 풀의 후보를 합쳐서 쓴다(둘 다 있어도 서로 안 밀어냄). -->
                         <StackPanel Orientation="Horizontal" Margin="0,2,0,0">

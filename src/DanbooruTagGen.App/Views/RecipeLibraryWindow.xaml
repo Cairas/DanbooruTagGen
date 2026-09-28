@@ -221,8 +221,13 @@
                                         <TextBox Text="{Binding MinCount}" Width="30" Margin="4,0" FontSize="11"/>
                                         <TextBlock Text="~ 최대" VerticalAlignment="Center" FontSize="11"/>
                                         <TextBox Text="{Binding MaxCount}" Width="30" Margin="4,0" FontSize="11"/>
-                                        <TextBlock Text="개" VerticalAlignment="Center" FontSize="11"/>
+                                        <TextBlock Text="개 · 발동 확률" VerticalAlignment="Center" FontSize="11"/>
+                                        <TextBox Text="{Binding ChancePercentText, UpdateSourceTrigger=PropertyChanged}" Width="34" Margin="4,0" FontSize="11"
+                                                 ToolTip="이 슬롯이 한 줄에서 아예 뜰 확률(0~100). 비워두면 100(항상).&#x0a;발동하면 위 개수만큼 뽑고, 발동 안 하면 그 줄엔 0개."/>
+                                        <TextBlock Text="%" VerticalAlignment="Center" FontSize="11"/>
                                     </StackPanel>
+                                    <TextBlock Text="{Binding ChancePercentError}" Foreground="#C62828" FontSize="11" TextWrapping="Wrap"
+                                               Visibility="{Binding HasChancePercentError, Converter={StaticResource BoolToVis}}"/>
                                     <ItemsControl ItemsSource="{Binding InlineTags}">
                                         <ItemsControl.ItemsPanel>
                                             <ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate>

@@ -72,6 +72,25 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
         set { if (_slot is RandomPoolSlot r && r.MaxCount != value) { r.MaxCount = value; OnPropertyChanged(); RefreshHeader(); } }
     }
 
+    /// <summary>발동 확률 편집칸(비우면 100). 파싱·오류 문구는 <see cref="RandomPoolSlot.ChancePercentText"/>가
+    /// 맡아 빌더와 같은 규칙을 쓴다.</summary>
+    public string ChancePercentText
+    {
+        get => (_slot as RandomPoolSlot)?.ChancePercentText ?? "";
+        set
+        {
+            if (_slot is not RandomPoolSlot r) return;
+            r.ChancePercentText = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ChancePercentError));
+            OnPropertyChanged(nameof(HasChancePercentError));
+            RefreshHeader();
+        }
+    }
+
+    public string ChancePercentError => (_slot as RandomPoolSlot)?.ChancePercentError ?? "";
+    public bool HasChancePercentError => ChancePercentError.Length > 0;
+
     [ObservableProperty] private string _header = "";
     [ObservableProperty] private string _addTagText = "";
 
@@ -120,7 +139,8 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
         Header = _slot switch
         {
             FixedSlot f => $"[고정] {f.Label} — {f.Tags.Count}개{offMark}",
-            RandomPoolSlot r => $"[랜덤] {r.Label} — 매줄 {r.MinCount}~{r.MaxCount}개 " +
+            RandomPoolSlot r => $"[랜덤] {r.Label} — " + (r.ChancePercent is >= 0 and < 100 ? $"{r.ChancePercent}% 확률로 " : "") +
+                                $"매줄 {r.MinCount}~{r.MaxCount}개 " +
                                 $"(후보 {r.Tags.Count + poolCandidateCount}개{poolNote}){offMark}",
             AlternativeSlot alt => $"[대안] {alt.Label} — 그룹 {alt.Groups.Count}개 중 매줄 하나만 통째로 " +
                                    $"({string.Join(" / ", alt.Groups.Select(g => $"{g.Label}:{g.Tags.Count}개"))}){offMark}",

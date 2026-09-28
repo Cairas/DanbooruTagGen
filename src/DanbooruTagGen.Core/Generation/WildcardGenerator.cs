@@ -32,6 +32,10 @@ public sealed class WildcardGenerator
                         throw new GenerationValidationException($"슬롯 '{r.Label}'의 MinCount가 음수입니다.");
                     if (r.MaxCount < r.MinCount)
                         throw new GenerationValidationException($"슬롯 '{r.Label}'의 MaxCount가 MinCount보다 작습니다.");
+                    if (r.ChancePercent == RandomPoolSlot.UnparsedChance)
+                        throw new GenerationValidationException($"슬롯 '{r.Label}'의 발동 확률(chancePercent)이 정수가 아닙니다. 0~100 사이 정수로 쓰세요.");
+                    if (r.ChancePercent < 0 || r.ChancePercent > 100)
+                        throw new GenerationValidationException($"슬롯 '{r.Label}'의 발동 확률({r.ChancePercent}%)이 0~100 범위를 벗어났습니다.");
 
                     // Tags가 비어 있을 때만 풀 참조 자체의 유효성을 엄격히 따진다 — Tags가
                     // 이미 있으면 풀이 없거나 삭제됐어도(예: 참조가 끊긴 오래된 PoolId)
@@ -291,6 +295,12 @@ public sealed class WildcardGenerator
         IReadOnlyList<string> candidates, RandomPoolSlot slot, IRandomSource rnd,
         GenerationOptions options, ITagLookup? tagInfo)
     {
+        // 발동 여부를 개수보다 먼저 굴린다. 100(기본값)이면 굴림 자체를 생략한다 — 난수를 한 번이라도
+        // 더 소비하면 뒤따르는 모든 추첨이 밀려, chancePercent가 없는 기존 레시피가 같은 시드에서
+        // 예전과 다른 줄을 내게 된다.
+        if (slot.ChancePercent < 100 && rnd.Next(100) >= slot.ChancePercent)
+            return Enumerable.Empty<string>();
+
         int rangeWidth = slot.MaxCount - slot.MinCount + 1;
         int count = slot.MinCount + (rangeWidth > 1 ? rnd.Next(rangeWidth) : 0);
         count = Math.Min(count, candidates.Count);

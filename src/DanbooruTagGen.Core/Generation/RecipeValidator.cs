@@ -138,6 +138,7 @@ public static class RecipeValidator
                     Take(f.Tags);
                     break;
                 case RandomPoolSlot r:
+                    if (r.ChancePercent == 0) break;   // 절대 발동 안 하므로 출력되지 않는다
                     Take(r.Tags);
                     foreach (var id in r.ExtraPoolIds.Prepend(r.PoolId))
                         if (!string.IsNullOrEmpty(id) && poolsById.TryGetValue(id, out var pool))

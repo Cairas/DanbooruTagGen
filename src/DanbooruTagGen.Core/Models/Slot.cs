@@ -89,6 +89,65 @@ public sealed class RandomPoolSlot : Slot
         get => _maxCount;
         set { _maxCount = value; OnPropertyChanged(); }
     }
+
+    /// <summary>JSON의 <c>chancePercent</c>가 정수가 아니었음을 나타내는 표식. 정상 범위(0~100)
+    /// 밖이라 <see cref="Generation.WildcardGenerator.Validate"/>가 반드시 걸러 낸다.</summary>
+    public const int UnparsedChance = int.MinValue;
+
+    private int _chancePercent = 100;
+    /// <summary>이 슬롯이 한 줄에서 "발동"할 확률(0~100, 기본 100 = 항상). 발동하지 않으면 그 줄엔
+    /// 0개, 발동하면 기존대로 Min~Max개를 뽑는다. MinCount=0으로는 "0개"가 균등한 한 값일 뿐이라
+    /// "70%로 뜨고, 뜨면 1~6개"처럼 발동 여부와 개수를 따로 조절할 수 없어서 추가했다.
+    /// <para>반드시 <c>int</c>다 — <see cref="AlternativeGroup.Weight"/>에 소수(0.3)가 들어가
+    /// 역직렬화가 조용히 실패해 레시피가 통째로 시딩에서 빠진 사고가 있었다. 그래서 JSON 쪽은
+    /// <see cref="ChancePercentJsonConverter"/>가 파일 로드를 깨뜨리지 않고 받아 두었다가
+    /// 정수가 아니면 <see cref="UnparsedChance"/>로 표시해, 생성 전 검증에서 명시적으로 막는다.</para></summary>
+    [JsonConverter(typeof(ChancePercentJsonConverter))]
+    public int ChancePercent
+    {
+        get => _chancePercent;
+        set
+        {
+            _chancePercent = value;
+            _chancePercentText = null;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ChancePercentText));
+            OnPropertyChanged(nameof(ChancePercentError));
+            OnPropertyChanged(nameof(HasChancePercentError));
+        }
+    }
+
+    private string? _chancePercentText;
+    /// <summary>편집칸 전용(순수 UI 상태, 저장 안 함). int에 직접 바인딩하면 빈 칸을 "100"으로
+    /// 받을 수 없고, 잘못 친 글자는 WPF가 조용히 버려 오류를 보여 줄 수 없어서 문자열을 거친다.
+    /// 비우면 100, 정수면 그대로(범위 밖이어도 넣어 둬 생성 검증도 같이 막는다), 정수가 아니면
+    /// 값은 그대로 두고 <see cref="ChancePercentError"/>만 띄운다.</summary>
+    [JsonIgnore]
+    public string ChancePercentText
+    {
+        get => _chancePercentText ?? (_chancePercent == UnparsedChance ? "" : _chancePercent.ToString());
+        set
+        {
+            var text = (value ?? "").Trim();
+            if (text.Length == 0) ChancePercent = 100;
+            else if (int.TryParse(text, out var v)) ChancePercent = v;
+            _chancePercentText = text;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ChancePercentError));
+            OnPropertyChanged(nameof(HasChancePercentError));
+        }
+    }
+
+    /// <summary>편집칸 아래에 빨갛게 띄울 문구. 문제가 없으면 "".</summary>
+    [JsonIgnore]
+    public string ChancePercentError =>
+        _chancePercentText is { Length: > 0 } t && !int.TryParse(t, out _) ? "발동 확률은 0~100 사이 정수만 입력하세요."
+        : _chancePercent == UnparsedChance ? "발동 확률이 정수가 아닙니다. 0~100 사이 정수로 고치세요."
+        : _chancePercent is < 0 or > 100 ? $"발동 확률 {_chancePercent}%는 0~100 범위를 벗어났습니다."
+        : "";
+
+    [JsonIgnore]
+    public bool HasChancePercentError => ChancePercentError.Length > 0;
 }
 
 /// <summary>함께 나와야 하는 태그 묶음 하나(대안 그룹). AlternativeSlot이 매 줄 여러 그룹 중
