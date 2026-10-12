@@ -237,6 +237,126 @@ public class PresetSeederTests
         Assert.Equal(2, removed);
         Assert.Empty(userPools);
         Assert.Empty(userRecipes);
+        // 장부에서도 같이 빠져야 한다(예전엔 남겨 둬서, 번들에 같은 id가 돌아와도 Seed가
+        // "사용자가 지운 것"으로 보고 영영 다시 넣지 않는 유령 시딩이 됐다).
+        Assert.Empty(seeded);
+    }
+
+    // ── 유령 시딩 방지: 제거 시 장부 동기화 + 복귀 시 재시딩 ─────────────────
+
+    [Fact]
+    public void SyncRemovalAlsoDropsIdsFromLedger_ButKeepsUnrelatedIds()
+    {
+        var userPools = new List<Pool> { BundledPool("p1"), BundledPool("p2") };
+        var userRecipes = new List<Recipe> { BundledRecipe("r1"), BundledRecipe("r2") };
+        // "deleted-by-user"는 사용자가 지운(목록엔 없음) 번들 항목 — 제거 대상이 아니므로 장부에 남아야 한다.
+        var seeded = new HashSet<string> { "p1", "p2", "r1", "r2", "deleted-by-user" };
+
+        var (_, removed) = PresetSeeder.SyncBundled(
+            userPools, new[] { BundledPool("p2") }, userRecipes, new[] { BundledRecipe("r2") }, seeded);
+
+        Assert.Equal(2, removed);
+        Assert.Equal(new[] { "deleted-by-user", "p2", "r2" }, seeded.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void ItemRemovedFromBundleComesBackWhenBundleRestoresIt()
+    {
+        // 실제 시나리오: 편집 중 번들 파일이 잠깐 빠졌다(or 실수로 지웠다 되돌림) → 다음 동기화에서
+        // 같은 id로 돌아오면 사용자 목록에 다시 들어와야 한다.
+        var userPools = new List<Pool>();
+        var userRecipes = new List<Recipe>();
+        var seeded = new HashSet<string>();
+        var pools = new[] { BundledPool("p1") };
+        var recipes = new[] { BundledRecipe("r1"), BundledRecipe("r2", "둘") };
+
+        PresetSeeder.Seed(userPools, pools, userRecipes, recipes, seeded);
+
+        // r2가 번들에서 빠짐
+        var withoutR2 = new[] { recipes[0] };
+        PresetSeeder.Seed(userPools, pools, userRecipes, withoutR2, seeded);
+        var (_, removed) = PresetSeeder.SyncBundled(userPools, pools, userRecipes, withoutR2, seeded);
+        Assert.Equal(1, removed);
+        Assert.DoesNotContain(userRecipes, r => r.Id == "r2");
+
+        // r2가 같은 id로 복귀
+        var added = PresetSeeder.Seed(userPools, pools, userRecipes, recipes, seeded);
+        PresetSeeder.SyncBundled(userPools, pools, userRecipes, recipes, seeded);
+
+        Assert.True(added);
+        Assert.Contains(userRecipes, r => r.Id == "r2");
+        Assert.Contains("r2", seeded);
+        Assert.Single(userRecipes, r => r.Id == "r2");
+    }
+
+    [Fact]
+    public void SyncWithRemovalDisallowedKeepsItemsAndLedger()
+    {
+        var userRecipes = new List<Recipe> { BundledRecipe("r1") };
+        var seeded = new HashSet<string> { "r1" };
+
+        Assert.Equal(1, PresetSeeder.CountPendingRemovals(
+            new List<Pool>(), Array.Empty<Pool>(), userRecipes, Array.Empty<Recipe>(), seeded));
+
+        var (_, removed) = PresetSeeder.SyncBundled(
+            new List<Pool>(), Array.Empty<Pool>(), userRecipes, Array.Empty<Recipe>(), seeded, allowRemoval: false);
+
+        Assert.Equal(0, removed);
+        Assert.Single(userRecipes);
+        Assert.Contains("r1", seeded);
+    }
+
+    // ── 장부 저장 판단(PlanLedgerWrites) ──────────────────────────────────
+
+    [Fact]
+    public void LedgerPlan_NoChange_WritesNothing()
+    {
+        var (before, after) = PresetSeeder.PlanLedgerWrites(new[] { "a", "b" }, new HashSet<string> { "a", "b" });
+        Assert.Null(before);
+        Assert.Null(after);
+    }
+
+    [Fact]
+    public void LedgerPlan_AddOnly_WritesAfterDataOnly()
+    {
+        var (before, after) = PresetSeeder.PlanLedgerWrites(new[] { "a" }, new HashSet<string> { "a", "b" });
+        Assert.Null(before);
+        Assert.Equal(new[] { "a", "b" }, after!.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void LedgerPlan_RemoveOnly_WritesBeforeData()
+    {
+        // 예전 조건(added일 때만 저장)으로는 제거만 있을 때 장부가 아예 안 저장됐다.
+        var (before, after) = PresetSeeder.PlanLedgerWrites(new[] { "a", "b" }, new HashSet<string> { "a" });
+        Assert.Equal(new[] { "a" }, before);
+        Assert.Null(after);
+    }
+
+    [Fact]
+    public void LedgerPlan_AddAndRemove_RemovesFirstThenAdds()
+    {
+        // 먼저 쓰는 장부엔 제거만 반영(추가분은 아직 없음), 데이터 저장 뒤 최종 장부.
+        var (before, after) = PresetSeeder.PlanLedgerWrites(new[] { "a", "b" }, new HashSet<string> { "a", "c" });
+        Assert.Equal(new[] { "a" }, before);
+        Assert.Equal(new[] { "a", "c" }, after!.OrderBy(x => x, StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public void LedgerPlan_CrashBetweenWrites_DoesNotLeaveGhosts()
+    {
+        // 어느 틈에 죽어도 다음 실행 Seed가 흡수하는지: "제거 장부만 쓰고 데이터는 옛것"인 상태.
+        // 데이터엔 r1(번들에서 빠진 것)과 r0이 남아 있고, 장부는 before(r1 빠짐), 번들엔 r0·r2.
+        var userRecipes = new List<Recipe> { BundledRecipe("r0"), BundledRecipe("r1") };
+        var (before, _) = PresetSeeder.PlanLedgerWrites(new[] { "r0", "r1" }, new HashSet<string> { "r0", "r2" });
+        var seeded = new HashSet<string>(before!);
+
+        PresetSeeder.Seed(new List<Pool>(), Array.Empty<Pool>(),
+            userRecipes, new[] { BundledRecipe("r0"), BundledRecipe("r2", "둘") }, seeded);
+
+        Assert.Single(userRecipes, r => r.Id == "r0");   // 중복 없음
+        Assert.Single(userRecipes, r => r.Id == "r2");   // 추가분 정상 진입
+        Assert.Contains("r2", seeded);
     }
 
     [Fact]

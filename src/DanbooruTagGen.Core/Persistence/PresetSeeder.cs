@@ -65,11 +65,13 @@ public static class PresetSeeder
     ///     또는 id 도입 전 레거시 사본)은 절대 건드리지 않는다.
     ///
     /// 주의: 사용자가 번들 항목을 직접 수정했다면 그 수정은 덮어써진다(갱신의 의도).
+    /// <paramref name="allowRemoval"/>가 false면 교체·복구만 하고 제거는 건너뛴다(자동 경로의
+    /// 대량 제거 보류용 — <see cref="CountPendingRemovals"/> 참고).
     /// 반환: (교체된 항목 수, 제거된 항목 수).</summary>
     public static (int Updated, int Removed) SyncBundled(
         List<Pool> userPools, IReadOnlyList<Pool> bundledPools,
         List<Recipe> userRecipes, IReadOnlyList<Recipe> bundledRecipes,
-        ISet<string> seededIds)
+        ISet<string> seededIds, bool allowRemoval = true)
     {
         int updated = 0;
 
@@ -111,11 +113,63 @@ public static class PresetSeeder
             updated++;
         }
 
+        if (!allowRemoval) return (updated, 0);
+
         var bundledPoolIds = bundledPools.Select(p => p.Id).ToHashSet();
         var bundledRecipeIds = bundledRecipes.Select(r => r.Id).ToHashSet();
-        int removed = userPools.RemoveAll(u => seededIds.Contains(u.Id) && !bundledPoolIds.Contains(u.Id));
-        removed += userRecipes.RemoveAll(u => seededIds.Contains(u.Id) && !bundledRecipeIds.Contains(u.Id));
+        var removedIds = new List<string>();
+        int removed = userPools.RemoveAll(u =>
+        {
+            if (!seededIds.Contains(u.Id) || bundledPoolIds.Contains(u.Id)) return false;
+            removedIds.Add(u.Id);
+            return true;
+        });
+        removed += userRecipes.RemoveAll(u =>
+        {
+            if (!seededIds.Contains(u.Id) || bundledRecipeIds.Contains(u.Id)) return false;
+            removedIds.Add(u.Id);
+            return true;
+        });
+
+        // 장부에서도 같이 지운다. 안 지우면 "목록엔 없고 장부엔 있음" = 사용자가 지운 것과
+        // 구분이 안 돼서, 번들에 같은 id가 돌아와도 Seed가 영영 다시 넣지 않는다(유령 시딩).
+        // 지워 두면 번들 복귀 시 "아직 시딩 안 된 새 항목"으로 자연스럽게 다시 들어온다.
+        foreach (var id in removedIds) seededIds.Remove(id);
 
         return (updated, removed);
+    }
+
+    /// <summary><see cref="SyncBundled"/>가 지금 실행되면 제거할 항목 수(아무것도 바꾸지 않음).
+    /// 자동 경로(워처·퀵 갱신)는 이 값이 임계값을 넘으면 제거를 보류한다 — 대량 제거는
+    /// 번들 일부가 잠깐 안 보이는 순간(폴더 이동·체크아웃 중 등)일 가능성이 높아서다.</summary>
+    public static int CountPendingRemovals(
+        IReadOnlyList<Pool> userPools, IReadOnlyList<Pool> bundledPools,
+        IReadOnlyList<Recipe> userRecipes, IReadOnlyList<Recipe> bundledRecipes,
+        ISet<string> seededIds)
+    {
+        var bundledPoolIds = bundledPools.Select(p => p.Id).ToHashSet();
+        var bundledRecipeIds = bundledRecipes.Select(r => r.Id).ToHashSet();
+        return userPools.Count(u => seededIds.Contains(u.Id) && !bundledPoolIds.Contains(u.Id))
+             + userRecipes.Count(u => seededIds.Contains(u.Id) && !bundledRecipeIds.Contains(u.Id));
+    }
+
+    /// <summary>Seed/SyncBundled 뒤 장부(seededIds)를 언제 무엇으로 저장할지 정한다.
+    /// <para>추가와 제거는 크래시 안전 순서가 반대다.
+    /// 추가된 id는 데이터 저장 <b>뒤에</b> 장부에 써야 한다(먼저 쓰고 죽으면 장부에만 남는 유령).
+    /// 제거된 id는 데이터 저장 <b>전에</b> 장부에서 빼야 한다(데이터만 쓰고 죽으면 역시 장부에만
+    /// 남는 유령). 그래서 제거가 있으면 "이전 장부 − 제거분"을 데이터보다 먼저, 추가가 있으면
+    /// 최종 장부를 데이터 뒤에 쓴다. 어느 틈에 죽어도 다음 실행의 Seed가 같은 id 사본을
+    /// "이미 설치됨"으로 흡수하므로 중복도 유령도 생기지 않는다.</para>
+    /// 반환값의 각 목록이 null이면 그 시점엔 장부를 쓸 필요가 없다.</summary>
+    public static (List<string>? BeforeData, List<string>? AfterData) PlanLedgerWrites(
+        IReadOnlyList<string> previous, ISet<string> current)
+    {
+        var previousSet = previous.ToHashSet(StringComparer.Ordinal);
+        bool anyRemoved = previousSet.Any(id => !current.Contains(id));
+        bool anyAdded = current.Any(id => !previousSet.Contains(id));
+
+        var before = anyRemoved ? previous.Where(current.Contains).Distinct(StringComparer.Ordinal).ToList() : null;
+        var after = anyAdded ? current.ToList() : null;
+        return (before, after);
     }
 }

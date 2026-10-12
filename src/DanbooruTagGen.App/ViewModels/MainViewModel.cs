@@ -115,11 +115,16 @@ public sealed partial class MainViewModel : ObservableObject
 
     private FileSystemWatcher? _presetWatcher;
     private System.Windows.Threading.DispatcherTimer? _presetSyncDebounce;
-    /// <summary>번들 읽기가 실패해서 자동 갱신을 다시 예약한 횟수. 스크립트가 파일을 쓰는
-    /// 중이면 몇십 ms 뒤엔 성공하지만, id 중복 같은 제작 실수는 몇 번을 시도해도 그대로라
-    /// 무한 재시도가 되지 않게 상한을 둔다.</summary>
-    private int _presetSyncRetries;
-    private const int MaxPresetSyncRetries = 3;
+    /// <summary>번들 읽기 실패 시 자동 갱신 재시도 판단. 스크립트가 파일을 쓰는 중이면 몇십 ms
+    /// 뒤엔 성공하지만, JSON 문법 오류·id 중복 같은 제작 실수는 몇 번을 시도해도 그대로라
+    /// 변경 하나당 상한을 둔다. 예산은 파일 변경 이벤트마다 리셋된다(PresetSyncRetryGate 참고) —
+    /// 편집 중 깨진 저장이 끼어도 다음 유효한 저장에서 앱 재시작 없이 다시 동기화된다.</summary>
+    private readonly PresetSyncRetryGate _presetSyncRetry = new(maxRetries: 3);
+
+    /// <summary>자동 경로(워처·퀵 갱신)에서 한 번에 이보다 많이 제거하게 되면 제거만 보류한다.
+    /// 번들 일부가 잠깐 안 보이는 순간(폴더 이동·체크아웃 도중)에 대량 삭제되는 걸 막는 안전판.
+    /// 보류된 제거는 "⟳ 프리셋 갱신"(확인창 있는 수동 갱신)으로 적용된다.</summary>
+    private const int MaxAutoRemovals = 3;
 
     /// <summary>data/presets(번들 축 풀·컨셉 팩)의 변경을 감지해 자동으로 다시 읽는다. 예전엔
     /// JSON을 스크립트로 고칠 때마다 "⟳ 프리셋 갱신"을 손으로 눌러야 했다 — 이 병합 로직
@@ -143,6 +148,9 @@ public sealed partial class MainViewModel : ObservableObject
             // 건드리기 전에 UI 스레드로 넘긴다.
             System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
             {
+                // 새 변경 = 새 재시도 예산. 직전 저장이 깨진 JSON이라 재시도를 다 써 버렸어도
+                // 이번 저장은 처음부터 다시 시도한다.
+                _presetSyncRetry.OnSourceChanged();
                 _presetSyncDebounce!.Stop();
                 _presetSyncDebounce.Start();
             });
@@ -220,39 +228,42 @@ public sealed partial class MainViewModel : ObservableObject
     {
         if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out var error))
         {
-            // 워처가 "쓰는 중"인 파일을 잡은 경우가 대부분이라, 조금 뒤 한 번 더 시도한다.
-            // 계속 실패하면(예: id 중복 같은 제작 실수) 재시도를 멈추고 이유를 남긴다.
-            if (_presetSyncRetries < MaxPresetSyncRetries)
+            // 워처가 "쓰는 중"인 파일을 잡았거나 편집 도중 JSON이 잠깐 깨진 경우가 대부분이라,
+            // 조금 뒤 한 번 더 시도한다. 계속 실패하면 재시도를 멈추고 이유를 남긴다 — 사용자
+            // 데이터는 전혀 건드리지 않았으므로, 파일을 고쳐 저장하면 그 변경 이벤트로 다시 돈다.
+            if (_presetSyncRetry.TryScheduleRetry())
             {
-                _presetSyncRetries++;
                 _presetSyncDebounce?.Start();
-                Status = $"프리셋 갱신 재시도 중({_presetSyncRetries}/{MaxPresetSyncRetries})… {error}";
+                Status = $"프리셋 갱신 재시도 중({_presetSyncRetry.Retries}/{_presetSyncRetry.MaxRetries})… {error}";
                 return;
             }
-            Status = "프리셋 갱신 실패 — " + error;
+            Status = "프리셋 갱신 실패(파일을 고쳐 저장하면 자동으로 다시 시도) — " + error;
             return;
         }
-        _presetSyncRetries = 0;
-        ApplyBundledSync(bundled);
+        _presetSyncRetry.OnSucceeded();
+        ApplyBundledSync(bundled, removalLimit: MaxAutoRemovals);
     }
 
-    /// <summary>Seed+SyncBundled 실행, 화면 갱신, Status 문구 설정까지 — 확인/완료 UI는 호출부 책임.</summary>
-    private void ApplyBundledSync(BundledPresets bundled)
+    /// <summary>Seed+SyncBundled 실행, 화면 갱신, Status 문구 설정까지 — 확인/완료 UI는 호출부 책임.
+    /// <paramref name="removalLimit"/>보다 많이 제거하게 되면 제거만 보류한다(자동 경로용 안전판).</summary>
+    private void ApplyBundledSync(BundledPresets bundled, int removalLimit = int.MaxValue)
     {
-        var seeded = new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal);
+        var previousLedger = Settings.SeededPresetIds.ToList();
+        var seeded = new HashSet<string>(previousLedger, StringComparer.Ordinal);
         var added = PresetSeeder.Seed(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
-        var (updated, removed) = PresetSeeder.SyncBundled(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
+        int pendingRemovals = PresetSeeder.CountPendingRemovals(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
+        bool holdRemovals = pendingRemovals > removalLimit;
+        var (updated, removed) = PresetSeeder.SyncBundled(
+            Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded, allowRemoval: !holdRemovals);
         if (added || updated > 0 || removed > 0)
         {
-            // 데이터 먼저, 장부(seededIds)는 맨 마지막 — CommitSeeding과 같은 이유.
+            // 장부(seededIds) 저장 순서는 PresetSeeder.PlanLedgerWrites 참고:
+            // 제거분은 데이터보다 먼저 장부에서 빼고, 추가분은 데이터 뒤에 장부에 넣는다.
+            var (ledgerBefore, ledgerAfter) = PresetSeeder.PlanLedgerWrites(previousLedger, seeded);
+            if (ledgerBefore != null) SaveLedger(ledgerBefore);
             SavePools();
             SaveRecipeLibrary();
-            if (added)
-            {
-                Settings.SeededPresetIds = seeded.ToList();
-                _seededIdLookup = null;
-                SettingsStore.Save(Settings);
-            }
+            if (ledgerAfter != null) SaveLedger(ledgerAfter);
             // 화면이 옛 객체를 들고 있으면 창을 닫을 때 그 사본이 되쓰여 갱신이 무효가 된다.
             // (뷰모델은 InitializeAsync 뒤에야 생기므로 null 가드)
             RecipeBuilder?.RefreshPools();
@@ -269,7 +280,17 @@ public sealed partial class MainViewModel : ObservableObject
                 if (fresh != null) RecipeBuilder!.LoadRecipe(fresh);
             }
         }
-        Status = $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}.";
+        Status = $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}."
+                 + (holdRemovals
+                     ? $" (번들에서 빠진 항목 {pendingRemovals}개는 자동 제거를 보류 — 의도한 삭제면 \"⟳ 프리셋 갱신\"으로 적용)"
+                     : "");
+    }
+
+    private void SaveLedger(List<string> ids)
+    {
+        Settings.SeededPresetIds = ids;
+        _seededIdLookup = null;
+        SettingsStore.Save(Settings);
     }
 
     private Views.PoolLibraryWindow? _poolLibraryWindow;

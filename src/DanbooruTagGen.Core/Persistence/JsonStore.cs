@@ -55,6 +55,39 @@ public static class JsonStore
         }
     }
 
+    /// <summary><see cref="LoadOrDefault{T}"/>의 엄격판 — <b>번들 프리셋(data/presets) 전용</b>.
+    /// 파일이 없으면 fallback을 주지만, 손상(JsonException)·타입 불일치(정수 칸에 소수 등)·
+    /// 내용이 null·잠금/권한으로 못 읽음은 전부 <see cref="InvalidDataException"/>("파일명: 사유")으로 올린다.
+    /// <para>왜 따로 두나: 번들 쪽에서 손상 파일을 "없는 것"으로 삼키면, 그 결과를 받은
+    /// <see cref="PresetSeeder.SyncBundled"/>가 "번들에서 삭제된 항목"으로 오인해 사용자
+    /// 데이터에서 지워 버린다(편집 도중 JSON이 잠깐 깨진 순간 워처가 읽으면 실제로 발생 —
+    /// "유령 시딩"). 사용자 데이터(AppData) 쪽은 앱 시작을 막지 않는 게 더 중요하므로 계속
+    /// <see cref="LoadOrDefault{T}"/>를 쓴다.</para></summary>
+    public static T LoadStrict<T>(string path, T fallback)
+    {
+        if (!File.Exists(path)) return fallback;
+        var name = Path.GetFileName(path);
+        try
+        {
+            var json = ReadWithRetry(path);
+            return JsonSerializer.Deserialize<T>(json, Options)
+                   ?? throw new InvalidDataException($"{name}: 내용이 비어 있습니다(null).");
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException($"{name}: JSON 오류 — {ex.Message}", ex);
+        }
+        catch (NotSupportedException ex)
+        {
+            // 다형 슬롯의 type 판별자 누락 등 System.Text.Json이 JsonException이 아닌 걸로 올리는 경우.
+            throw new InvalidDataException($"{name}: 역직렬화 실패 — {ex.Message}", ex);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new InvalidDataException($"{name}: 파일을 읽을 수 없습니다 — {ex.Message}", ex);
+        }
+    }
+
     private static string ReadWithRetry(string path)
     {
         for (int attempt = 1; ; attempt++)

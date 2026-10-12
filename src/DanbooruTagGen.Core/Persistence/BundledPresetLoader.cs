@@ -29,8 +29,10 @@ public static class BundledPresetLoader
         error = "";
         try
         {
-            var pools = PoolStore.Load(poolsFile);
-            var recipes = RecipeLibraryStore.Load(recipesDir);
+            // 번들 전용 엄격 로드: 손상 파일을 "없는 것"으로 삼키면 SyncBundled가 그 항목을
+            // "번들에서 삭제됨"으로 오인해 사용자 데이터에서 지운다(유령 시딩). 실패는 false로.
+            var pools = PoolStore.LoadBundled(poolsFile);
+            var recipes = RecipeLibraryStore.LoadBundledDirectory(recipesDir);
             if (pools.Count == 0 && recipes.Count == 0)
             {
                 error = "번들 프리셋을 찾을 수 없습니다.";

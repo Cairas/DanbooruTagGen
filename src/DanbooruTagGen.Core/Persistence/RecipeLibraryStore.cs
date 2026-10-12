@@ -17,7 +17,16 @@ public static class RecipeLibraryStore
         return JsonStore.LoadOrDefault(path, new List<Recipe>());
     }
 
-    private static List<Recipe> LoadDirectory(string path)
+    /// <summary>번들 레시피 폴더(data/presets/recipes) 전용 엄격 로드. 폴더가 없으면 빈 목록,
+    /// 파일 하나라도 깨졌거나(JSON 오류·타입 불일치) 읽을 수 없으면 <see cref="InvalidDataException"/>.
+    /// 깨진 파일을 건너뛰면 호출부가 "번들에서 삭제됨"으로 오인해 사용자 데이터에서 지우기 때문이다
+    /// (<see cref="JsonStore.LoadStrict{T}"/> 참고).</summary>
+    public static List<Recipe> LoadBundledDirectory(string dir) =>
+        Directory.Exists(dir) ? LoadDirectory(dir, strict: true) : new List<Recipe>();
+
+    private static List<Recipe> LoadDirectory(string path) => LoadDirectory(path, strict: false);
+
+    private static List<Recipe> LoadDirectory(string path, bool strict)
     {
         var recipes = new List<Recipe>();
         var seenIds = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -25,9 +34,11 @@ public static class RecipeLibraryStore
         foreach (var file in Directory.EnumerateFiles(path, "*.json", SearchOption.AllDirectories)
                      .OrderBy(p => p, StringComparer.OrdinalIgnoreCase))
         {
-            var recipe = JsonStore.LoadOrDefault<Recipe?>(file, null);
+            var recipe = strict
+                ? JsonStore.LoadStrict<Recipe?>(file, null)
+                : JsonStore.LoadOrDefault<Recipe?>(file, null);
             if (recipe == null)
-                continue;
+                continue;   // strict에선 파일이 그 사이 지워진 경우뿐(=정말로 번들에서 빠짐)
 
             if (string.IsNullOrWhiteSpace(recipe.Id))
                 throw new InvalidDataException($"Recipe file '{file}' has no id.");
