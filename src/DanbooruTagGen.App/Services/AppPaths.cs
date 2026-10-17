@@ -23,6 +23,9 @@ public static class AppPaths
     /// <summary>모순 태그 규칙 파일(상호배타 그룹). data/ 동봉.</summary>
     public static string ConflictsFile { get; } = Path.Combine(DataDir, "conflicts.csv");
 
+    /// <summary>상대 필요 규칙 파일(requires|태그|any-of|상대…). data/ 동봉 — 없으면 Core 내장본을 쓴다.</summary>
+    public static string RequiresFile { get; } = Path.Combine(DataDir, "requires.csv");
+
     /// <summary>프로그램 제공 프리셋(번들 축 풀·컨셉 팩). 앱 시작 시 PresetSeeder가
     /// 사용자 데이터(%APPDATA%)로 한 번만 주입한다 — 깃에는 이 번들만 올라가고
     /// 사용자 커스텀은 올라가지 않는 구조의 경계선.</summary>

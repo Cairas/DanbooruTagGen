@@ -588,9 +588,10 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         ValidationText = issues.Count == 0 ? "" : "⚠ " + string.Join("\n⚠ ", issues.Select(i => i.Message));
     }
 
+    /// <summary>켜 둔 생성 훅도 함께 검사한다 — 생성할 때 훅이 슬롯으로 끼워지므로 실제 출력과 같은 대상을 본다.</summary>
     private IReadOnlyList<Core.Generation.ValidationIssue> ValidateRecipe(Recipe recipe) =>
         Core.Generation.RecipeValidator.Validate(
-            recipe, _main.Pools.ToDictionary(p => p.Id), _main.TagInfo, Suggest);
+            recipe, _main.Pools.ToDictionary(p => p.Id), _main.TagInfo, Suggest, _main.Hooks, _main.Requires, _main.Conflicts);
 
     /// <summary>오탈자와 비슷한 실제 태그 이름 3개까지. 태그 DB가 아직 없으면 빈 목록.</summary>
     private IReadOnlyList<string> Suggest(string tag) =>
@@ -605,6 +606,9 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         var snapshot = Recipes.ToList();
         var pools = _main.Pools.ToDictionary(p => p.Id);
         var lookup = _main.TagInfo;
+        var hooks = _main.Hooks.ToList();   // 백그라운드에서 읽으므로 사본
+        var requires = _main.Requires;
+        var conflicts = _main.Conflicts;
         AuditRows.Clear();
         OnPropertyChanged(nameof(HasAuditRows));
         AuditSummary = "검사 중…";
@@ -617,7 +621,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
                 for (int i = 0; i < snapshot.Count; i++)
                 {
                     token.ThrowIfCancellationRequested();
-                    var issues = Core.Generation.RecipeValidator.Validate(snapshot[i], pools, lookup);
+                    var issues = Core.Generation.RecipeValidator.Validate(snapshot[i], pools, lookup, hooks: hooks, requires: requires, conflicts: conflicts);
                     if (issues.Count > 0)
                         rows.Add(new AuditRow(snapshot[i].Id, snapshot[i].Name, issues));
                 }

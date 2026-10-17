@@ -18,6 +18,14 @@ public sealed class GenerationOptions
     public bool AvoidDuplicateLines { get; set; } = true;
     /// <summary>모순(상호배타) 태그가 한 줄에 같이 나오면 재추첨해 피한다. 기본 켜짐.</summary>
     public bool AvoidConflicts { get; set; } = true;
+    /// <summary>모순 회피를 "줄 전체 재추첨" 전에 슬롯 단위로 먼저 한다: 슬롯을 정의 순서대로 뽑으면서,
+    /// 이미 확정된 앞쪽 슬롯들의 태그와 새로 충돌할 후보(랜덤 풀 후보·ALT 그룹)를 그 자리에서 빼고 뽑는다.
+    /// <para>왜: 줄 전체 재추첨은 충돌과 무관한 슬롯까지 전부 다시 굴려서, 충돌 멤버를 품은 ALT 브랜치가
+    /// 명목 가중치보다 훨씬 덜 나온다(n517: 14.3% → 2.3%). 로컬 필터는 앞쪽 슬롯의 선택을 존중하고 뒤쪽
+    /// 슬롯만 맞춰 준다 — 그래서 "포즈 ALT가 손짓 풀보다 먼저 온다" 같은 슬롯 순서가 곧 우선순위다.</para>
+    /// <para>후보가 전부 걸러지면(또는 MinCount를 못 채우면) 필터 없이 뽑고 기존 줄 재추첨에 맡긴다(폴백).
+    /// <see cref="AvoidConflicts"/>가 꺼져 있으면 아무 일도 안 한다. 기본 꺼짐 — 켜면 같은 시드에서도 줄이 달라진다.</para></summary>
+    public bool LocalConflictFiltering { get; set; }
     /// <summary>출력 시 '_'를 공백으로 (SD 프롬프트 관례: long_hair -> long hair). 기본 켜짐.</summary>
     public bool UnderscoreToSpace { get; set; } = true;
     /// <summary>랜덤 슬롯 추첨 방식. 기본 Uniform(기존 동작 보존). 빈도 메타데이터가

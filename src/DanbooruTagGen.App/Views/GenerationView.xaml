@@ -15,9 +15,16 @@
             <TextBox  Grid.Row="1" Grid.Column="1" Text="{Binding SeedText}" ToolTip="-1 또는 빈 칸 = 매번 랜덤. 숫자를 넣으면 그 시드로 고정(재현 가능)."/>
             <CheckBox Grid.Row="2" Grid.Column="1" Content="줄 내 중복 제거" IsChecked="{Binding DedupeWithinLine}"/>
             <CheckBox Grid.Row="3" Grid.Column="1" Content="줄 중복 회피" IsChecked="{Binding AvoidDuplicateLines}"/>
-            <CheckBox Grid.Row="4" Grid.Column="1" IsChecked="{Binding AvoidConflicts}"
-                      Content="모순 태그 회피 (예: long_hair + short_hair)"
-                      ToolTip="data/conflicts.csv의 상호배타 그룹이 한 줄에 같이 들어가면 재추첨"/>
+            <StackPanel Grid.Row="4" Grid.Column="1">
+                <CheckBox IsChecked="{Binding AvoidConflicts}"
+                          Content="모순 태그 회피 (예: long_hair + short_hair)"
+                          ToolTip="data/conflicts.csv의 상호배타 그룹이 한 줄에 같이 들어가면 재추첨"/>
+                <!-- 줄 전체 재추첨은 무관한 ALT 브랜치까지 억제한다 — 앞쪽 슬롯과 충돌할 후보를 그 자리에서 빼고 뽑는다. -->
+                <CheckBox IsChecked="{Binding LocalConflictFiltering}" Margin="16,0,0,0"
+                          IsEnabled="{Binding AvoidConflicts}"
+                          Content="슬롯 단위로 먼저 걸러내기 (앞쪽 슬롯 우선)"
+                          ToolTip="슬롯을 순서대로 뽑으면서, 앞에서 이미 확정된 태그와 충돌할 후보만 빼고 뽑습니다. 다 걸러지면 기존 줄 재추첨으로 폴백. 켜면 같은 시드라도 결과가 달라집니다."/>
+            </StackPanel>
             <CheckBox Grid.Row="5" Grid.Column="1" Content="_→공백 (long_hair → long hair)" IsChecked="{Binding UnderscoreToSpace}"/>
             <CheckBox Grid.Row="6" Grid.Column="1" IsChecked="{Binding WeightedSampling}"
                       Content="빈도 가중 추첨 (인기 태그 우대)"

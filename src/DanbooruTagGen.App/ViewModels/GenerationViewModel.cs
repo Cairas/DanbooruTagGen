@@ -94,6 +94,8 @@ public sealed partial class GenerationViewModel : ObservableObject
     [ObservableProperty] private bool _dedupeWithinLine = true;
     [ObservableProperty] private bool _avoidDuplicateLines = true;
     [ObservableProperty] private bool _avoidConflicts = true;
+    /// <summary>모순 회피를 슬롯 단위로 먼저(GenerationOptions.LocalConflictFiltering). 기본 꺼짐.</summary>
+    [ObservableProperty] private bool _localConflictFiltering;
     [ObservableProperty] private bool _insertBlankLine = true;
     [ObservableProperty] private bool _underscoreToSpace = true;
     /// <summary>빈도 가중 추첨(인기 태그가 더 자주). 기본 꺼짐 — 균등 추첨.</summary>
@@ -395,6 +397,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         DedupeWithinLine = s.DedupeWithinLine;
         AvoidDuplicateLines = s.AvoidDuplicateLines;
         AvoidConflicts = s.AvoidConflicts;
+        LocalConflictFiltering = s.LocalConflictFiltering;
         InsertBlankLine = s.InsertBlankLine;
         UnderscoreToSpace = s.UnderscoreToSpace;
         WeightedSampling = s.WeightedSampling;
@@ -415,6 +418,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         s.DedupeWithinLine = DedupeWithinLine;
         s.AvoidDuplicateLines = AvoidDuplicateLines;
         s.AvoidConflicts = AvoidConflicts;
+        s.LocalConflictFiltering = LocalConflictFiltering;
         s.InsertBlankLine = InsertBlankLine;
         s.UnderscoreToSpace = UnderscoreToSpace;
         s.WeightedSampling = WeightedSampling;
@@ -433,6 +437,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         DedupeWithinLine = DedupeWithinLine,
         AvoidDuplicateLines = AvoidDuplicateLines,
         AvoidConflicts = AvoidConflicts,
+        LocalConflictFiltering = LocalConflictFiltering,
         UnderscoreToSpace = UnderscoreToSpace,
         Sampling = WeightedSampling ? SamplingMode.Weighted : SamplingMode.Uniform,
         AutoOrderTags = AutoOrderTags,
@@ -550,6 +555,7 @@ public sealed partial class GenerationViewModel : ObservableObject
         DedupeWithinLine = o.DedupeWithinLine,
         AvoidDuplicateLines = o.AvoidDuplicateLines,
         AvoidConflicts = o.AvoidConflicts,
+        LocalConflictFiltering = o.LocalConflictFiltering,
         UnderscoreToSpace = o.UnderscoreToSpace,
         Sampling = o.Sampling,
         AutoOrderTags = o.AutoOrderTags,
@@ -581,10 +587,13 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// 몇 줄인지 같이 알려 준다 — 넘으면 뒤쪽 태그가 밀려 반영이 약해진다.</summary>
     private void RefreshLineStats(GenerationResult result)
     {
-        var stats = LineStats.Measure(result.Lines);
+        var stats = LineStats.Measure(result.Lines, lookup: _main.TagInfo);
         if (stats.LineCount == 0) { LineStatsText = ""; return; }
+        // 토큰은 거친 근사(LineStats.EstimateClipTokens) — 75토큰 청크를 넘는 줄이 얼마나 되는지 보는 눈대중용.
         LineStatsText = $"줄당 태그 평균 {stats.Average} · 최소 {stats.Min} · 최대 {stats.Max}"
-            + (stats.OverBudget > 0 ? $"  ⚠ 예산({stats.Budget}) 초과 {stats.OverBudget}줄" : "");
+            + (stats.OverBudget > 0 ? $"  ⚠ 예산({stats.Budget}) 초과 {stats.OverBudget}줄" : "")
+            + $"\n자연어 단어 평균 {stats.PhraseWordsAverage}(최대 {stats.PhraseWordsMax}) · 추정 토큰 평균 {stats.TokensAverage}(최대 {stats.TokensMax})"
+            + (stats.MultiChunkLines > 0 ? $"  ⚠ 75토큰 넘는 줄 {stats.MultiChunkLines}줄(최대 {stats.ChunksMax}청크)" : "");
     }
 
     /// <summary>미리보기 내용을 클립보드로. 읽기 전용 상자에서 드래그로 긁는 것보다 빠르다.</summary>

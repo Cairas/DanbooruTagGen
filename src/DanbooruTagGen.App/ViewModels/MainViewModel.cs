@@ -29,6 +29,9 @@ public sealed partial class MainViewModel : ObservableObject
 
     /// <summary>모순 태그 규칙(상호배타 그룹). 시작 시 data/conflicts.csv에서 로드.</summary>
     public Core.Generation.ConflictRules Conflicts { get; private set; } = Core.Generation.ConflictRules.Empty;
+    /// <summary>상대 필요 규칙. 시작 시 data/requires.csv에서 로드(없으면 빌드에 내장된 같은 파일).
+    /// tools/conflict_scan.py와 같은 표를 읽는다.</summary>
+    public Core.Generation.RequiresRules Requires { get; private set; } = Core.Generation.RequiresRules.Default;
     /// <summary>태그 빈도·그룹 메타데이터 조회. 가중 추첨/순서 자동 배치에 생성기로 주입.
     /// 태그 DB 자체(TagDatabase)가 ITagLookup을 구현한다.</summary>
     public Core.Generation.ITagLookup? TagInfo { get; private set; }
@@ -90,6 +93,7 @@ public sealed partial class MainViewModel : ObservableObject
         var csvPaths = SettingsStore.ResolveCsvPaths(Settings);
         var db = await Task.Run(() => TagDatabase.LoadFromFiles(csvPaths));
         Conflicts = await Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
+        Requires = await Task.Run(() => Core.Generation.RequiresRules.LoadFromFileOrDefault(AppPaths.RequiresFile));
         TagInfo = db;
         TagDb = db;
 

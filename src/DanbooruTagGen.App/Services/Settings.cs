@@ -18,6 +18,8 @@ public sealed class Settings
     public bool DedupeWithinLine { get; set; } = true;
     public bool AvoidDuplicateLines { get; set; } = true;
     public bool AvoidConflicts { get; set; } = true;
+    /// <summary>모순 회피를 슬롯 단위로 먼저 할지(GenerationOptions.LocalConflictFiltering). 기본 꺼짐.</summary>
+    public bool LocalConflictFiltering { get; set; }
     public bool InsertBlankLine { get; set; } = true;
     public bool UnderscoreToSpace { get; set; } = true;
     public bool WeightedSampling { get; set; }

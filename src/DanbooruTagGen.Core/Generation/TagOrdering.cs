@@ -83,12 +83,29 @@ public sealed class TagOrdering
     }
 
     /// <summary>태그의 표준 순서 등급. 품질 이름 → 0, 그룹 키워드 → 표, 캐릭터/작품/작가 카테고리 → 2,
-    /// 그 외(미분류) → Unranked.</summary>
+    /// 그 외(미분류) → Unranked.
+    /// <para>원문이 아니라 <see cref="TagKey"/> 조각으로 본다 — <c>(huge_penis:1.2)</c>는 <c>huge_penis</c>와
+    /// 같은 등급, "(문장:1.1), bite_mark" 같은 묶음은 등급이 잡히는 **첫 조각**(작성 순서상 대개 주 동반
+    /// 태그)의 등급을 따른다. 예전엔 원문 조회가 실패해 작성자가 가장 강조한 가중치 태그가 오히려
+    /// 정렬에서 빠졌다. 등급이 잡히는 조각이 하나도 없는 순수 자연어만 Unranked(원래 위치 고정).</para></summary>
     internal int RankOf(string tag)
     {
-        if (QualityNames.Contains(tag)) return QualityRank;
+        foreach (var f in TagKey.Split(tag))
+        {
+            // implies: 조각은 출력되지 않으므로 배치 위치를 정할 자격이 없다 — "(문장), implies:voyeurism"이
+            // voyeurism의 '시점' 자리로 끌려가면 출력에 남는 건 문장뿐인데 엉뚱한 곳에 놓인다.
+            if (f.IsImplied) continue;
+            var rank = RankOfKey(f.Key);
+            if (rank != Unranked) return rank;
+        }
+        return Unranked;
+    }
 
-        var info = _lookup.Lookup(tag);
+    private int RankOfKey(string key)
+    {
+        if (QualityNames.Contains(key)) return QualityRank;
+
+        var info = _lookup.Lookup(key);
         if (info is null) return Unranked;
 
         var group = TagGroupKeywords.FromAliases(info.Aliases);

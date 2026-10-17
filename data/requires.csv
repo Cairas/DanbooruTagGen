@@ -1,0 +1,20 @@
+# "다른 태그가 있어야 성립하는 태그" 규칙 — 지금은 전부 "상대가 화면에 있어야 하는 행위"다.
+# 앱의 레시피 검증(src/DanbooruTagGen.Core/Generation/RecipeValidator.cs, RequiresRules.cs로 읽음)과
+# 개발용 스캐너(tools/conflict_scan.py)가 이 파일 하나를 같이 읽는다. 예전엔 두 곳에 표가 따로 있어
+# 한쪽만 고치는 실수가 났다. 앱은 빌드 때 이 파일을 Core에 내장(EmbeddedResource)하고, 실행 폴더의
+# data/requires.csv가 있으면 그걸 우선 읽는다.
+#
+# 형식:  requires|태그1,태그2,...|any-of|필요태그1,필요태그2,...[|strict]
+#   왼쪽 태그 중 하나라도 나오면, 오른쪽 목록 중 하나 이상이 함께 있어야 한다.
+#   strict = 엄격 검사(스캐너) 전용. 앱의 레시피 검증은 이 줄을 건너뛴다.
+#
+# 두 검사기가 일부러 다르게 보는 부분(합치지 말 것):
+#   • 앱 검증은 레시피 전체 기준(어느 슬롯이든 상대 태그가 있으면 통과)이고, 서술 문장에 man/his/monster
+#     같은 낱말이 있어도 상대가 있는 것으로 인정한다. 스캐너는 ALT 그룹·랜덤 슬롯 단위로, 그 단위가 스스로
+#     상대를 데려오는지 본다.
+#   • 사후 흔적 태그(아래 strict 줄)는 상대가 떠난 뒤에도 몸에 남는 "상태"라, 앱 검증에 넣으면 사후 장면
+#     컨셉을 전부 잘못 지적한다(실제로 팩 3개가 이 이유로 오탐이었다). 스캐너는 단위별로 보므로 계속 잡는다.
+# '#'로 시작하는 줄은 주석. 태그명은 danbooru 원형(언더스코어). 오른쪽 목록 앞 세 개는 앱 경고 문구의 예시로 쓰인다.
+
+requires|sitting_on_person,hetero,sex,vaginal,anal,deep_penetration,imminent_penetration,penis_awe,fellatio,irrumatio,deepthroat,doggystyle,missionary,spooning,sex_from_behind,mating_press,piledriver_(sex),prone_bone,cowgirl_position,girl_on_top,standing_sex,full_nelson,suspended_congress,double_penetration,triple_penetration,multiple_penetration,spitroast,knotting,grabbing_another's_hair,grabbing_another's_breast,grabbing_another's_ass,hand_on_another's_face,hand_on_another's_head,head_grab,neck_grab,strangling,spanking,thigh_grab,torso_grab,held_down|any-of|1boy,tentacles,penis,2boys,3boys,4boys,multiple_boys,faceless_male,2girls,3girls,multiple_girls,multiple_others,everyone,monster,monster_boy,orc,goblin,oni,demon,minotaur,penis_tentacle,bestiality,dog,horse,pig,machinery,sex_machine,milking_machine,huge_penis,large_penis,veiny_penis
+requires|ejaculation,cum_in_pussy,cum_in_mouth,internal_cumshot|any-of|1boy,tentacles,penis,2boys,3boys,4boys,multiple_boys,faceless_male,2girls,3girls,multiple_girls,multiple_others,everyone,monster,monster_boy,orc,goblin,oni,demon,minotaur,penis_tentacle,bestiality,dog,horse,pig,machinery,sex_machine,milking_machine,huge_penis,large_penis,veiny_penis|strict

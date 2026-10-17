@@ -130,7 +130,9 @@ public static class SlotRoleClassifier
         foreach (var g in alt.Groups)
         {
             if (g.Weight == 0) continue;   // 안 뽑히는 그룹은 세지 않는다
-            var hit = g.Tags.Where(VisualTags.Contains).OrderBy(t => t, StringComparer.Ordinal);
+            // 원문 대신 판정 키로 본다 — "(vaginal:1.2)"·"(문장:1.1), vaginal"도 vaginal로 센다.
+            var hit = g.Tags.SelectMany(TagKey.Keys).Where(VisualTags.Contains)
+                .Distinct(StringComparer.Ordinal).OrderBy(t => t, StringComparer.Ordinal);
             sigs.Add(string.Join(",", hit));
         }
         int nonEmpty = sigs.Count(s => s.Length > 0);

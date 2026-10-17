@@ -10,4 +10,10 @@
     <InternalsVisibleTo Include="DanbooruTagGen.Tests" />
   </ItemGroup>
 
+  <!-- 상대 필요 규칙(RequiresRules.Default). tools/conflict_scan.py가 같은 파일을 직접 읽으므로
+       표가 한 곳에만 있다. 내장해 두면 테스트·도구도 실행 폴더 경로 없이 같은 표를 쓴다. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\data\requires.csv" LogicalName="DanbooruTagGen.Core.requires.csv" />
+  </ItemGroup>
+
 </Project>
