@@ -120,10 +120,11 @@ public sealed partial class HookEditViewModel : ObservableObject
     /// <summary>직접 입력 태그를 쉼표로 편집한다. 참조 풀의 후보와 합쳐져 하나의 후보군이 된다.</summary>
     [ObservableProperty] private string _tagsText = "";
 
+    /// <remarks>바인딩이 LostFocus라 입력 도중(괄호가 아직 안 닫힌 상태)에는 불리지 않는다. 괄호 깊이를 지켜 자른다
+    /// (<see cref="Core.Generation.TagKey.SplitList"/>) — "(she is dragged in, still in shock:1.2)"가 두 조각으로
+    /// 쪼개져 저장되던 문제. 짝이 안 맞으면 SplitList가 단순 분할로 폴백하고, 검증의 괄호 문법 경고가 잡는다.</remarks>
     partial void OnTagsTextChanged(string value) =>
-        Hook.Tags = value
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
+        Hook.Tags = Core.Generation.TagKey.SplitList(value).ToList();
 
     [RelayCommand]
     private void ClearPool() => SelectedPool = null;

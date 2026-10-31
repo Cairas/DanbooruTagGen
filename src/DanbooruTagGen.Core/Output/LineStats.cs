@@ -99,9 +99,13 @@ public static class LineStats
     /// 사전이 없으면: <see cref="PhraseMinWordsWithoutLookup"/>단어 이상이면 자연어(근사).</summary>
     internal static bool IsPhraseItem(string item, ITagLookup? lookup)
     {
-        var core = TagKey.StripWeight(item, out _);
+        // 출력 줄은 태그명 괄호가 이스케이프돼 있다(piledriver \(sex\)) — 사전 대조 전에 되돌린다.
+        var stripped = TagKey.StripWeight(item, out _);
+        var core = TagKey.UnescapeParens(stripped);
         if (!core.Any(char.IsWhiteSpace)) return false;
-        if (lookup != null) return lookup.Lookup(TagKey.Normalize(core)) is null;
+        if (lookup != null)
+            return lookup.Lookup(TagKey.Normalize(core)) is null
+                   && (ReferenceEquals(core, stripped) || lookup.Lookup(TagKey.Normalize(stripped)) is null);
         return WordCount(core) >= PhraseMinWordsWithoutLookup;
     }
 

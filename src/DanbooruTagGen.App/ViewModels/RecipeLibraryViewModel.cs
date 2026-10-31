@@ -110,7 +110,9 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     {
         AddTagError = "";
         Suggestions.Clear();
-        var lastPiece = value.Contains(',') ? value[(value.LastIndexOf(',') + 1)..].Trim() : value.Trim();
+        // 괄호 밖 쉼표만 항목 구분 — 안 닫힌 "(she is dragged in, sti"를 치는 중이면 전체가 한 항목이라 "sti"로
+        // 검색하지 않는다(거기서 후보를 누르면 문장 중간이 태그로 바뀌어 버린다).
+        var lastPiece = value[(Core.Generation.TagKey.LastTopLevelComma(value) + 1)..].Trim();
         if (_tagDb != null && lastPiece.Length > 0)
             foreach (var t in _tagDb.SearchRanked(lastPiece, 8)) Suggestions.Add(t);
         OnPropertyChanged(nameof(HasSuggestions));
@@ -121,7 +123,7 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     [RelayCommand]
     private void SelectSuggestion(Tag tag)
     {
-        var comma = AddTagText.LastIndexOf(',');
+        var comma = Core.Generation.TagKey.LastTopLevelComma(AddTagText);
         AddTagText = comma >= 0 ? AddTagText[..(comma + 1)] + " " + tag.Name : tag.Name;
         AddTag();
     }
@@ -160,11 +162,12 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     private void AddTag()
     {
         if (string.IsNullOrWhiteSpace(AddTagText)) return;
+        if (RecipeBuilderViewModel.UnbalancedInputError(AddTagText) is { } unbalanced) { AddTagError = unbalanced; return; }
         var rejected = new List<string>();
         string error = "";
-        foreach (var piece in AddTagText.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var piece in Core.Generation.TagKey.SplitList(AddTagText))
         {
-            if (Core.Generation.WeightRange.FindError(piece) is { } err)
+            if (Core.Generation.TagKey.FindInputError(piece) is { } err)
             {
                 rejected.Add(piece);
                 if (error.Length == 0) error = $"'{piece}' 추가 안 됨: {err}";

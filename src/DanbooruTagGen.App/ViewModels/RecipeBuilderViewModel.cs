@@ -183,9 +183,11 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
             _main.Status = "직접 추가할 태그/문구를 먼저 입력하세요.";
             return;
         }
+        // 괄호가 안 닫혔으면 아무것도 넣지 않는다 — 쉼표 분할이 괄호 안 문장 쉼표에서 잘라 조각 일부만 들어간다.
+        if (UnbalancedInputError(CustomTagInput) is { } unbalanced) { _main.Status = unbalanced; return; }
         var rejected = new List<string>();
         string? error = null;
-        foreach (var piece in CustomTagInput.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var piece in Core.Generation.TagKey.SplitList(CustomTagInput))
         {
             if (RangeError(piece) is { } err) { rejected.Add(piece); error ??= err; continue; }
             AddTagToSelectedSlot(piece);
@@ -198,7 +200,13 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     /// <summary>가중치 범위 표기((tag:1.1~1.3))가 잘못됐으면 상태 표시줄용 문구, 아니면 null.
     /// 넣는 순간 막아야 한다 — 그냥 넣으면 저장까지 되고 생성할 때에야 검증 오류로 터진다.</summary>
     private static string? RangeError(string piece) =>
-        Core.Generation.WeightRange.FindError(piece) is { } err ? $"'{piece}' 추가 안 됨: {err}" : null;
+        Core.Generation.TagKey.FindInputError(piece) is { } err ? $"'{piece}' 추가 안 됨: {err}" : null;
+
+    /// <summary>입력 전체의 괄호 짝이 안 맞으면 상태 표시줄 문구(입력칸은 그대로 둔다), 맞으면 null.</summary>
+    internal static string? UnbalancedInputError(string input) =>
+        Core.Generation.TagKey.HasBalancedParens(input)
+            ? null
+            : "괄호 짝이 맞지 않아 추가하지 않았습니다 — 괄호를 닫은 뒤 다시 추가하세요(괄호 안 쉼표는 문장 일부로 보존됩니다).";
 
     /// <summary>현재 슬롯 구성을 디스크에 저장한다. 저장 버튼과 창 닫기 시 자동 저장 둘 다에서 호출.</summary>
     [RelayCommand]
@@ -508,10 +516,11 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     public string AddTagsToGroup(AlternativeGroup group, string input)
     {
         if (string.IsNullOrWhiteSpace(input)) return "";
+        if (UnbalancedInputError(input) is { } unbalanced) { _main.Status = unbalanced; return input; }
         var lowFreq = "";
         var rejected = new List<string>();
         string? error = null;
-        foreach (var piece in input.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (var piece in Core.Generation.TagKey.SplitList(input))
         {
             if (RangeError(piece) is { } err) { rejected.Add(piece); error ??= err; continue; }
             if (group.Tags.Contains(piece)) continue;

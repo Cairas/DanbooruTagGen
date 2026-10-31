@@ -517,7 +517,13 @@ public sealed partial class GenerationViewModel : ObservableObject
             int completedBefore = done;
             var inner = new Progress<int>(n => progress.Report(completedBefore + n));
 
-            var result = _generator.Generate(job.Recipes[i], job.Pools, opts, _main.Conflicts, _main.TagInfo, inner, token);
+            GenerationResult result;
+            try { result = _generator.Generate(job.Recipes[i], job.Pools, opts, _main.Conflicts, _main.TagInfo, inner, token); }
+            catch (GenerationValidationException ex) when (job.Recipes.Count > 1)
+            {
+                // 일괄 생성에선 레시피 하나의 검증 오류가 전체를 멈춘다 — 어느 레시피인지 붙여야 찾아 고칠 수 있다.
+                throw new GenerationValidationException($"레시피 '{job.Recipes[i].Name}' — {ex.Message}");
+            }
 
             outputs.Add(new RecipeOutput(job.Recipes[i], result));
             done += result.Lines.Count;

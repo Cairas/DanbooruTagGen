@@ -20,6 +20,12 @@ public enum ValidationRule
     /// 이 동작이 다른 슬롯과 모순돼도(예: 양손이 이미 풀넬슨에 쓰였는데 "그의 손이 가슴을 움켜쥠") 못 잡는다
     /// (n560 "그의 손" 풀에서 실제로 겪음). 뜻이 같은 동반 태그나 <c>implies:태그</c>를 붙이면 풀린다.</summary>
     AnchorlessPhrase,
+
+    /// <summary>괄호·가중치 문법 오류: 괄호 짝 불일치, 숫자로 안 읽히는 가중치(<c>(x:1,2)</c>), 구분자 오타
+    /// (<c>(x;1.2)</c>) 등(<see cref="TagKey.FindSyntaxError"/>). 생성은 이런 문자열도 원문 그대로 내보내서
+    /// 프롬프트에 깨진 문법이 섞인 줄 모르게 된다 — 짝 없는 괄호는 A1111에서 뒤 태그 전체를 강조 그룹으로 삼킨다.
+    /// 이모티콘(<c>:(</c>)·문장 속 콜론(<c>(she whispers: please~)</c>)은 지적하지 않는다.</summary>
+    MalformedSyntax,
 }
 
 /// <summary>레시피 하나에서 발견한 지적 사항. <see cref="Subject"/>는 원인이 된 태그.</summary>
@@ -78,7 +84,14 @@ public static class RecipeValidator
     {
         var (target, hookSlotNames) = WithHooks(recipe, hooks, poolsById);
         var issues = new List<ValidationIssue>();
-        var (tags, phrases, units) = CollectStrings(target, poolsById, hookSlotNames);
+        var (tags, phrases, units, raws) = CollectStrings(target, poolsById, hookSlotNames);
+
+        // 괄호·가중치 문법. 문자열(후보) 단위로 보고, 같은 문자열은 한 번만 지적한다(풀 공유 등으로 여러 번 모일 수 있다).
+        var syntaxSeen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (raw, where, hook) in raws)
+            if (TagKey.FindSyntaxError(raw) is { } syntaxError && syntaxSeen.Add(raw))
+                issues.Add(new ValidationIssue(ValidationRule.MalformedSyntax, raw,
+                    $"'{Shorten(raw)}'({where}) — {syntaxError}" + HookNote(hook)));
 
         if (tagInfo != null)
         {
@@ -166,17 +179,21 @@ public static class RecipeValidator
     /// 표현으로 분류돼 동반 태그의 오탈자가 그대로 통과했다). <c>implies:</c> 조각은 출력은 안 되지만
     /// 판정에서는 있는 태그로 보므로 태그 쪽에 들어간다(존재 검사·상대 검사·닻 판정 전부).
     /// 추첨 가중치 0(<c>0::</c>)인 랜덤 풀 후보는 절대 안 뽑히므로 뺀다.</summary>
-    private static (List<(TagFragment Fragment, string? Hook)> Tags, List<string> Phrases, List<Unit> Units) CollectStrings(
+    private static (List<(TagFragment Fragment, string? Hook)> Tags, List<string> Phrases, List<Unit> Units,
+        List<(string Raw, string Where, string? Hook)> Raws) CollectStrings(
         Recipe recipe, IReadOnlyDictionary<string, Pool> poolsById, Dictionary<Slot, string>? hookSlots)
     {
         var tags = new List<(TagFragment, string?)>();
         var phrases = new List<string>();
         var units = new List<Unit>();
+        var raws = new List<(string, string, string?)>();
 
-        List<TagFragment> Take(IEnumerable<string> raw, string? hook)
+        List<TagFragment> Take(IEnumerable<string> raw, string? hook, string where)
         {
             var frags = new List<TagFragment>();
             foreach (var s in raw)
+            {
+                raws.Add((s, where, hook));
                 foreach (var f in TagKey.Split(s))
                 {
                     if (f.Text.Length == 0) continue;
@@ -184,6 +201,7 @@ public static class RecipeValidator
                     if (f.IsPhrase && !f.IsImplied) phrases.Add(f.Text);
                     else tags.Add((f, hook));
                 }
+            }
             return frags;
         }
 
@@ -194,7 +212,7 @@ public static class RecipeValidator
             switch (slot)
             {
                 case FixedSlot f:
-                    Take(f.Tags, hook);
+                    Take(f.Tags, hook, $"'{slot.Label}' 고정");
                     break;
                 case RandomPoolSlot r:
                     if (r.ChancePercent == 0) break;   // 절대 발동 안 하므로 출력되지 않는다
@@ -205,17 +223,21 @@ public static class RecipeValidator
                     foreach (var c in candidates)
                     {
                         if (TagKey.ParsePickWeight(c).Weight == 0) continue;
-                        units.Add(new Unit(Take(new[] { c }, hook), $"'{slot.Label}' 풀 후보", hook));
+                        var where = $"'{slot.Label}' 풀 후보";
+                        units.Add(new Unit(Take(new[] { c }, hook, where), where, hook));
                     }
                     break;
                 case AlternativeSlot alt:
                     foreach (var g in alt.Groups)
                         if (g.Weight != 0)   // 가중치 0은 절대 안 뽑히므로 지적해도 소용없다
-                            units.Add(new Unit(Take(g.Tags, hook), $"'{slot.Label}' 그룹 '{g.Label}'", hook));
+                        {
+                            var where = $"'{slot.Label}' 그룹 '{g.Label}'";
+                            units.Add(new Unit(Take(g.Tags, hook, where), where, hook));
+                        }
                     break;
             }
         }
 
-        return (tags, phrases, units);
+        return (tags, phrases, units, raws);
     }
 }

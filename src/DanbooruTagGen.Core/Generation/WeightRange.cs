@@ -30,8 +30,9 @@ public static class WeightRange
         if (tag.IndexOf('~') < 0) return tag; // 대부분의 태그는 여기서 끝(정규식 비용 없음)
         return RangeTail.Replace(tag, m =>
         {
-            // Validate가 생성 전에 막지만, Generate를 거치지 않는 경로에서도 원문을 보존한다.
-            if (TryParse(m, out int lo, out int hi) is not null) return m.Value;
+            // 범위 "시도"가 아닌 꼬리(문장 속 콜론+물결)는 원문 그대로. Validate가 생성 전에 오류를 막지만,
+            // Generate를 거치지 않는 경로에서도 원문을 보존한다.
+            if (!IsRangeAttempt(m) || TryParse(m, out int lo, out int hi) is not null) return m.Value;
             int v = lo + rnd.Next(hi - lo + 1);
             return ":" + Format(v) + ")";
         });
@@ -43,10 +44,27 @@ public static class WeightRange
         if (tag.IndexOf('~') < 0) return null;
         foreach (Match m in RangeTail.Matches(tag))
         {
+            if (!IsRangeAttempt(m)) continue;
             var err = TryParse(m, out _, out _);
             if (err is not null) return err;
         }
         return null;
+    }
+
+    /// <summary>꼬리 ":LO~HI)"가 범위 표기를 **쓰려던 것**인가: 한쪽이라도 숫자로 읽히거나, 양쪽 어디에도 글자가
+    /// 없고 숫자가 하나라도 있다. 자연어 문장 속 콜론 뒤에 물결이 오는 경우(<c>(she whimpers: ah~)</c>)를 범위로
+    /// 오인해 "숫자로 읽을 수 없음" 예외를 던지면 그 레시피 생성 전체가 멈췄다. 양쪽 다 숫자가 아니고 글자가
+    /// 섞였으면 범위가 아니라 문장이다 — 범위가 아니므로 오류도 아니다(가중치 문법 오타는
+    /// <see cref="TagKey.FindSyntaxError"/>가 검증 경고로 따로 본다). <c>a~1.3</c>·<c>~1.3</c>·<c>1.1~1,3</c>처럼
+    /// 한쪽이 숫자인 오타는 여전히 시도로 보고 막는다.</summary>
+    private static bool IsRangeAttempt(Match m)
+    {
+        string lo = m.Groups["lo"].Value.Trim(), hi = m.Groups["hi"].Value.Trim();
+        if (IsNumber(lo) || IsNumber(hi)) return true;
+        if (lo.Any(char.IsLetter) || hi.Any(char.IsLetter)) return false;
+        return lo.Any(char.IsAsciiDigit) || hi.Any(char.IsAsciiDigit);
+
+        static bool IsNumber(string s) => double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out _);
     }
 
     private static string? TryParse(Match m, out int lo100, out int hi100)

@@ -136,6 +136,7 @@ public sealed class WildcardGenerator
         var lines = new List<string>(options.LineCount);
         var warnings = new List<string>();
         var lineConflicts = new List<LineConflict>();
+        // 줄 중복 판정 키 집합(LineKey) — 렌더링된 원문이 아니다.
         var seen = new HashSet<string>(StringComparer.Ordinal);
         bool dupWarned = false, conflictWarned = false;
 
@@ -145,12 +146,15 @@ public sealed class WildcardGenerator
         // 2026-08-26). 이 딕셔너리는 Generate() 호출 하나 안에서만 산다 — 다른 레시피/다른
         // Generate() 호출로 새지 않는다.
         var lastPickedByAlt = new Dictionary<AlternativeSlot, AlternativeGroup>();
+        // 랜덤 풀 슬롯도 같은 목적으로 "바로 전 줄에서 뽑힌 후보들"을 기억한다(2-10). 자연어 후보가 든 풀에서
+        // 같은 문장이 연달아 나오는 걸 줄인다. 회피 방식은 PickRoulette의 설명 참고(가중 편중을 보존한다).
+        var lastPickedByPool = new Dictionary<RandomPoolSlot, HashSet<string>>();
 
         // 한 줄을 생성하고(가중 추첨) 표준 순서로 정렬한다. 재추첨 루프와 공유.
         List<(string Tag, SlotRole Role)> NextParts()
         {
             trace?.Clear();   // 재추첨으로 버린 시도의 기록은 남기지 않는다
-            var p = GenerateLineParts(recipe, poolsById, options, rnd, tagInfo, lastPickedByAlt, local, trace);
+            var p = GenerateLineParts(recipe, poolsById, options, rnd, tagInfo, lastPickedByAlt, local, trace, lastPickedByPool);
             if (orderer is null) return p;
             // 정렬은 태그 기준이므로, 정렬 결과 순서에 맞춰 역할을 다시 붙인다.
             var roleOf = new Dictionary<string, SlotRole>(StringComparer.Ordinal);
@@ -171,20 +175,22 @@ public sealed class WildcardGenerator
             var parts = NextParts();
             var tags = parts.Select(p => p.Tag).ToList();
             string line = Render(parts);
+            string lineKey = LineKey(tags);
 
             // 중복/모순을 한 번의 재추첨 루프에서 함께 피한다.
             int retries = 0;
             while (retries < MaxDedupeRetries &&
-                   ((options.AvoidDuplicateLines && seen.Contains(line)) ||
+                   ((options.AvoidDuplicateLines && seen.Contains(lineKey)) ||
                     (checkConflicts && rules.HasConflict(tags))))
             {
                 parts = NextParts();
                 tags = parts.Select(p => p.Tag).ToList();
                 line = Render(parts);
+                lineKey = LineKey(tags);
                 retries++;
             }
 
-            if (options.AvoidDuplicateLines && seen.Contains(line) && !dupWarned)
+            if (options.AvoidDuplicateLines && seen.Contains(lineKey) && !dupWarned)
             {
                 warnings.Add("조합 공간이 부족해 일부 줄이 중복될 수 있습니다.");
                 dupWarned = true;
@@ -207,13 +213,27 @@ public sealed class WildcardGenerator
                 }
             }
 
-            seen.Add(line);
+            seen.Add(lineKey);
             lines.Add(line);
             observer?.Invoke(new LineTrace(i, trace!.ToArray(), retries, leftover));
         }
 
         progress?.Report(lines.Count);
         return new GenerationResult(lines, warnings) { Conflicts = lineConflicts };
+    }
+
+    /// <summary>줄 중복 판정 키(<see cref="GenerationOptions.AvoidDuplicateLines"/>): 줄에 **출력되는** 조각들의 판정 키
+    /// (<see cref="TagKey"/>) 집합을 정렬해 이은 것. 렌더링된 원문을 비교하던 예전 방식은 가중치 범위
+    /// (<c>tag:1.0~1.2</c>)가 줄마다 다른 숫자로 치환되면 내용이 똑같은 두 줄을 "다른 줄"로 봐서 중복 회피가
+    /// 새었다. 판정 키는 가중치 표기를 벗기므로 숫자만 다른 줄은 같은 줄이다. 순서만 다른 줄도 같은 줄로 본다
+    /// (같은 태그 묶음). <c>implies:</c> 조각은 출력에 안 나가므로 뺀다.</summary>
+    internal static string LineKey(IEnumerable<string> tags)
+    {
+        var keys = new SortedSet<string>(StringComparer.Ordinal);
+        foreach (var t in tags)
+            foreach (var f in TagKey.Split(t))
+                if (!f.IsImplied && f.Key.Length > 0) keys.Add(f.Key);
+        return string.Join("\n", keys);
     }
 
     /// <summary>한 줄의 태그 목록을 정식 태그명(언더스코어)으로 생성한다(블록리스트/줄내중복 적용).</summary>
@@ -239,7 +259,8 @@ public sealed class WildcardGenerator
         ITagLookup? tagInfo = null,
         Dictionary<AlternativeSlot, AlternativeGroup>? lastPickedByAlt = null,
         LocalFilter? local = null,
-        List<PickRecord>? trace = null)
+        List<PickRecord>? trace = null,
+        Dictionary<RandomPoolSlot, HashSet<string>>? lastPickedByPool = null)
     {
         // 블록리스트·줄 내 중복은 원문이 아니라 판정 키(TagKey)로 본다 — "(lowres:1.2)"나
         // "(문장:1.1), lowres"도 lowres로 식별돼야 블록리스트가 새지 않는다.
@@ -264,9 +285,15 @@ public sealed class WildcardGenerator
                     foreach (var t in f.Tags) Add(t, role);
                     break;
                 case RandomPoolSlot r:
-                    foreach (var t in PickRandom(ResolveCandidates(r, poolsById), r, rnd, options, tagInfo, local, lineKeys))
+                {
+                    HashSet<string>? avoidPicks = null;
+                    lastPickedByPool?.TryGetValue(r, out avoidPicks);
+                    var picks = PickRandom(ResolveCandidates(r, poolsById), r, rnd, options, tagInfo, local, lineKeys, avoidPicks);
+                    if (lastPickedByPool != null) lastPickedByPool[r] = new HashSet<string>(picks, StringComparer.Ordinal);
+                    foreach (var t in picks)
                         if (Add(t, role)) trace?.Add(new PickRecord(si, null, t));
                     break;
+                }
                 case AlternativeSlot alt:
                     if (alt.Groups.Count > 0)
                     {
@@ -321,7 +348,10 @@ public sealed class WildcardGenerator
     /// <summary>태그 목록을 출력 한 줄로 합친다. 출력 시점에만 '_'→공백 변환.
     /// <c>implies:</c> 조각과 추첨 가중치 접두는 여기서 뺀다(<see cref="TagKey.OutputText"/> — 둘 다 없는
     /// 문자열은 원문 그대로라 기존 출력은 한 글자도 안 바뀐다). 빼고 나서 남는 게 없는 문자열(implies:만 있던
-    /// 후보)은 통째로 건너뛴다 — 안 그러면 ", ," 빈 칸이 생긴다. 원래부터 빈 문자열은 예전처럼 둔다.</summary>
+    /// 후보)은 통째로 건너뛴다 — 안 그러면 ", ," 빈 칸이 생긴다. 원래부터 빈 문자열은 예전처럼 둔다.
+    /// <para>마지막으로 리터럴 괄호를 이스케이프한다(<see cref="TagKey.EscapeLiteralParens"/>): <c>piledriver_(sex)</c> →
+    /// <c>piledriver_\(sex\)</c>. A1111/ComfyUI는 맨 괄호를 강조 그룹으로 읽어 태그명이 깨진다. 가중치 문법
+    /// <c>(본문:1.2)</c>의 바깥 괄호는 그대로 둔다. 괄호 없는 태그(대부분)는 한 글자도 안 바뀐다.</para></summary>
     private static string JoinLine(List<string> tags, GenerationOptions options)
     {
         var outputs = new List<string>(tags.Count);
@@ -329,7 +359,7 @@ public sealed class WildcardGenerator
         {
             var o = TagKey.OutputText(t);
             if (o.Length == 0 && t.Length > 0) continue;
-            outputs.Add(o);
+            outputs.Add(TagKey.EscapeLiteralParens(o));
         }
         return options.UnderscoreToSpace
             ? string.Join(", ", outputs.Select(ToDisplay))
@@ -377,17 +407,20 @@ public sealed class WildcardGenerator
     /// <paramref name="lineKeys"/>(앞쪽 슬롯에서 확정된 판정 키) + 이 슬롯에서 이미 뽑은 후보와 새로 충돌하는
     /// 후보를 그 회차에서 뺀다.</para>
     /// <para>접두도 필터도 없는 균등 추첨은 예전 <see cref="PickUniform"/>을, 빈도 가중은 예전과 같은 정수 룰렛을
-    /// 그대로 탄다 — 난수 소비가 한 번도 달라지지 않아 기존 레시피는 같은 시드에서 같은 줄이 나온다.</para></summary>
-    internal static IEnumerable<string> PickRandom(
+    /// 그대로 탄다 — 난수 소비가 한 번도 달라지지 않아 기존 레시피는 같은 시드에서 같은 줄이 나온다.</para>
+    /// <para><paramref name="avoid"/>: 바로 전 줄에서 이 슬롯이 뽑은 후보들(반복 회피, <see cref="PickRoulette"/>).
+    /// 다 뽑는 경우(개수 ≥ 뽑을 수 있는 후보 수)엔 피할 방법이 없으므로 쓰지 않는다.</para></summary>
+    internal static IReadOnlyList<string> PickRandom(
         IReadOnlyList<string> candidates, RandomPoolSlot slot, IRandomSource rnd,
         GenerationOptions options, ITagLookup? tagInfo,
-        LocalFilter? local = null, HashSet<string>? lineKeys = null)
+        LocalFilter? local = null, HashSet<string>? lineKeys = null,
+        HashSet<string>? avoid = null)
     {
         // 발동 여부를 개수보다 먼저 굴린다. 100(기본값)이면 굴림 자체를 생략한다 — 난수를 한 번이라도
         // 더 소비하면 뒤따르는 모든 추첨이 밀려, chancePercent가 없는 기존 레시피가 같은 시드에서
         // 예전과 다른 줄을 내게 된다.
         if (slot.ChancePercent < 100 && rnd.Next(100) >= slot.ChancePercent)
-            return Enumerable.Empty<string>();
+            return Array.Empty<string>();
 
         var pickWeights = PickWeightsOf(candidates);
         int pickable = pickWeights is null ? candidates.Count : pickWeights.Count(w => w > 0);
@@ -399,7 +432,10 @@ public sealed class WildcardGenerator
         // 빈도 메타데이터가 있을 때만 가중 추첨. 없으면 균등으로 폴백.
         bool byFrequency = options.Sampling == SamplingMode.Weighted && tagInfo is not null;
         bool filtering = local != null && lineKeys != null;
-        if (!byFrequency && pickWeights is null && !filtering)
+        if (avoid is { Count: 0 } || count >= pickable) avoid = null;
+        // 균등 + 회피는 가중치 전부 1인 룰렛으로 탄다 — 그 룰렛의 난수 소비는 PickUniform과 정확히 같아서
+        // (rnd.Next(남은 수) → 그 위치), 회피가 실제로 일어나는 회차 말고는 같은 시드에서 같은 결과가 나온다.
+        if (!byFrequency && pickWeights is null && !filtering && avoid is null)
             return PickUniform(candidates, count, rnd);
 
         var weights = byFrequency ? SamplingWeights(candidates, tagInfo!) : Enumerable.Repeat(1, candidates.Count).ToArray();
@@ -407,7 +443,7 @@ public sealed class WildcardGenerator
             for (int i = 0; i < weights.Length; i++)
                 weights[i] = (int)Math.Min(int.MaxValue, (long)weights[i] * pickWeights[i]);
 
-        return PickRoulette(candidates, weights, count, slot.MinCount, rnd, filtering ? local : null, lineKeys);
+        return PickRoulette(candidates, weights, count, slot.MinCount, rnd, filtering ? local : null, lineKeys, avoid);
     }
 
     /// <summary>후보별 추첨 가중치 접두(<c>N::</c>). 접두가 하나도 없으면 null(=전부 1, 기존 경로).</summary>
@@ -433,10 +469,18 @@ public sealed class WildcardGenerator
     /// 가중치 0 후보는 처음부터 뺀다.
     /// <para><paramref name="local"/>이 있으면 회차마다 "지금 줄 + 이 슬롯에서 이미 뽑은 것"과 새로 충돌하는 후보를
     /// 빼고 굴린다. 다 빠지면: 이미 MinCount를 채웠으면 거기서 멈추고, 못 채웠으면 그 회차만 필터 없이 굴려
-    /// 줄 단위 재추첨에 맡긴다(폴백 — MinCount 보장이 필터보다 우선).</para></summary>
+    /// 줄 단위 재추첨에 맡긴다(폴백 — MinCount 보장이 필터보다 우선).</para>
+    /// <para><paramref name="avoid"/>(바로 전 줄의 후보들)가 있으면 반복 회피: 뽑힌 후보 d가 avoid에 있으면 확률
+    /// s_d = w_min·(T − w_d) / ((T − w_min)·w_d)로 avoid 밖의 후보 중에서 다시 뽑는다(T = 이번 회차 후보 가중치 합,
+    /// w_min = 그중 최솟값). 이 s는 "후보 하나를 뽑는 슬롯"에서 정상 분포(각 후보의 장기 등장률)를 **정확히 보존**하면서
+    /// 연속 반복을 최대한 줄이는 값이다(상세 균형: 전이 P(j|i) = c·p_j, c = 1/(1 − p_min)). ALT 회피
+    /// (<see cref="PickGroup"/>)가 "가중치가 다르면 손대지 않음"으로 편중을 지킨다면, 풀은 빈도 가중 추첨 때문에
+    /// 가중치가 거의 늘 달라서 그 가드를 그대로 쓰면 기능이 꺼진 것과 같다 — 대신 편중을 보존하는 확률로 회피한다.
+    /// 가중치가 다 같으면 s = 1(항상 피함 = ALT와 같은 동작), 무거운 후보일수록 덜 피한다(편중 유지).
+    /// 여러 개를 뽑는 슬롯·avoid가 여럿일 때는 근사다. 다른 후보가 없으면(전부 avoid) 그냥 받아들인다.</para></summary>
     private static List<string> PickRoulette(
         IReadOnlyList<string> candidates, int[] weightsIn, int count, int minCount, IRandomSource rnd,
-        LocalFilter? local, HashSet<string>? lineKeys)
+        LocalFilter? local, HashSet<string>? lineKeys, HashSet<string>? avoid = null)
     {
         var remaining = new List<string>(candidates.Count);
         var weights = new List<int>(candidates.Count);
@@ -477,6 +521,8 @@ public sealed class WildcardGenerator
             }
             if (pos >= count2) pos = count2 - 1; // 부동소수 경계 보호
             int idx = filtered ? eligible![pos] : pos;
+            if (avoid != null && avoid.Contains(remaining[idx]))
+                idx = AvoidRepeat(remaining, weights, filtered ? eligible : null, count2, total, idx, avoid, rnd);
 
             picked.Add(remaining[idx]);
             work?.UnionWith(local!.KeysOf(remaining[idx]));
@@ -484,6 +530,44 @@ public sealed class WildcardGenerator
             weights.RemoveAt(idx);
         }
         return picked;
+    }
+
+    /// <summary><see cref="PickRoulette"/>의 반복 회피 한 회차. 다시 뽑을지 정하고(확률 s), 다시 뽑으면 avoid 밖
+    /// 후보 중 가중치 비례로 고른다. 반환: 최종 인덱스(remaining 기준).</summary>
+    private static int AvoidRepeat(
+        List<string> remaining, List<int> weights, List<int>? eligible, int drawCount, long total,
+        int drawn, HashSet<string> avoid, IRandomSource rnd)
+    {
+        long wMin = long.MaxValue, altTotal = 0;
+        for (int j = 0; j < drawCount; j++)
+        {
+            int k = eligible != null ? eligible[j] : j;
+            wMin = Math.Min(wMin, weights[k]);
+            if (!avoid.Contains(remaining[k])) altTotal += weights[k];
+        }
+        if (altTotal == 0 || total <= wMin) return drawn;   // 다른 후보가 없다
+
+        long wd = weights[drawn];
+        double s = (double)wMin * (total - wd) / ((double)(total - wMin) * wd);
+        if (s < 1)
+        {
+            const int Resolution = 1_000_000;
+            if (rnd.Next(Resolution) >= s * Resolution) return drawn;
+        }
+
+        int roll = altTotal <= int.MaxValue ? rnd.Next((int)altTotal) : rnd.Next(int.MaxValue);
+        long target = altTotal <= int.MaxValue ? roll : (long)((double)roll / int.MaxValue * altTotal);
+        long acc = 0;
+        int last = drawn;
+        for (int j = 0; j < drawCount; j++)
+        {
+            int k = eligible != null ? eligible[j] : j;
+            if (avoid.Contains(remaining[k])) continue;
+            last = k;
+            acc += weights[k];
+            if (target < acc) return k;
+        }
+        return last;   // 부동소수 경계 보호
     }
 
     /// <summary>비복원 균등 추첨.</summary>
