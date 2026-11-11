@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet run --project tools/RecipeStats:*)",
+      "Bash(python3 tools/conflict_scan.py:*)",
+      "Bash(cp data/*)"
+    ]
+  }
+}

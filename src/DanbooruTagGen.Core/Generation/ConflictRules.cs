@@ -432,7 +432,12 @@ public sealed class ConflictRules
 
     /// <summary>슬롯 하나를 분석용으로 정리한 것. Set: 슬롯 전체 키, Candidates: 후보 문자열별 키
     /// (랜덤 풀만 — ALT 그룹은 그 SlotSpec 자체가 후보 하나다).</summary>
-    private sealed record RandomSlotInfo(HashSet<string> Set, bool Multi, int MaxCount, int? AltGroupOwnerId, List<HashSet<string>> Candidates);
+    private sealed record RandomSlotInfo(HashSet<string> Set, bool Multi, int MaxCount, int? AltGroupOwnerId, List<HashSet<string>> Candidates)
+    {
+        /// <summary>키가 2개 이상인 후보(묶음 문자열)만. 상호배타 판정의 "후보 하나 안에서 공존" 검사는 이것만 보면 된다 —
+        /// 단일 태그 후보가 대부분이라 규칙마다 전 후보를 훑던 비용이 크게 준다.</summary>
+        public List<HashSet<string>> MultiKeyCandidates { get; } = Candidates.Where(c => c.Count >= 2).ToList();
+    }
 
     /// <summary>슬롯 단위 사전 점검(권장). 같은 랜덤 슬롯에서 나오는 태그들은 그 슬롯의 MaxCount가
     /// 2 이상일 때만 서로 공존할 수 있다 — MaxCount=1이면 하나만 뽑히므로 그 풀 안의 상호배타
@@ -462,10 +467,23 @@ public sealed class ConflictRules
             })
             .ToList();
 
+        // 레시피 어디서든 나올 수 있는 키. 판정에 쓰이는 모든 집합(고정·슬롯·후보)이 이것의 부분집합이라,
+        // 여기 없는 멤버는 어떤 판정에도 끼지 못한다 — 그런 멤버만 가진 규칙·쌍을 미리 건너뛰어도 결과는 같다.
+        // 왜: 편 나눔 규칙은 교차 쌍마다 전 슬롯·후보를 훑어서, 레시피와 무관한 규칙까지 다 돌면
+        // 라이브러리 전체 배지 계산이 UI 스레드에서 수 초가 걸렸다(283팩 × 921규칙, 2026-11-12 실측 2.5초).
+        var reachable = new HashSet<string>(fixedTags, StringComparer.Ordinal);
+        foreach (var rs in randomSlots) reachable.UnionWith(rs.Set);
+
+        bool fixedMultiPerson = fixedTags.Overlaps(MultiPersonMarkers);
         var result = new List<RecipeConflict>();
         foreach (var g in _keyed)
         {
-            if (g.Group.Scope == ConflictScope.Character && fixedTags.Overlaps(MultiPersonMarkers)) continue;
+            int reachableMembers = 0;
+            foreach (var m in g.Members) if (reachable.Contains(m.Key)) reachableMembers++;
+            // 예산 규칙은 멤버 하나로도 넘을 수 있어(비용 > 예산) 하나도 없을 때만 건너뛴다.
+            if (reachableMembers < (g.Kind == ConflictKind.Budget ? 1 : 2)) continue;
+
+            if (g.Group.Scope == ConflictScope.Character && fixedMultiPerson) continue;
             if (g.ExceptKeys.Length > 0 && g.ExceptKeys.Any(fixedTags.Contains)) continue;
 
             switch (g.Kind)
@@ -484,6 +502,7 @@ public sealed class ConflictRules
                         for (int j = i + 1; j < g.Members.Length; j++)
                         {
                             if (g.Members[i].Side == g.Members[j].Side) continue;
+                            if (!reachable.Contains(g.Members[i].Key) || !reachable.Contains(g.Members[j].Key)) continue;
                             var pair = new[] { g.Members[i] with { Side = 0 }, g.Members[j] with { Side = 1 } };
                             if (AnalyzeExclusive(g.Group.Label, pair, g.ExceptKeys, fixedTags, randomSlots) is not { } h) continue;
                             any = true;
@@ -567,9 +586,8 @@ public sealed class ConflictRules
         // 랜덤 풀 후보 문자열 하나(묶음) 안에 멤버 2개 이상 → 그 후보가 뽑히면 항상 같이 나온다.
         // 슬롯 자체는 가끔만 그 후보를 뽑으므로 Possible.
         foreach (var rs in randomSlots)
-            foreach (var cand in rs.Candidates)
+            foreach (var cand in rs.MultiKeyCandidates)
             {
-                if (cand.Count < 2) continue;
                 if (exceptKeys.Any(cand.Contains)) continue;
                 var inCand = PresentIn(cand);
                 if (inCand.Count < 2) continue;

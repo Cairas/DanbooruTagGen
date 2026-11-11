@@ -9,9 +9,9 @@ public static class WildcardWriter
     /// <summary>레시피 이름들을 파일명으로 바꾼다(입력 순서 그대로).
     ///
     /// 레시피별로 파일을 나눠 뽑으면 그 파일명이 곧 와일드카드 토큰이 되므로, 이름을 최대한
-    /// 그대로 살린다(🔞·공백·괄호 유지). 손대는 건 파일 시스템이 거부하는 것뿐이다:
-    /// 금지문자 제거, 윈도우가 저장하지 못하는 <b>끝의 공백·마침표</b> 정리, 남은 게 없으면
-    /// fallback(레시피 id) 사용.
+    /// 그대로 살린다(🔞·공백·괄호 유지). 손대는 건 파일 시스템이나 와일드카드 선택기가 거부하는 것뿐이다:
+    /// 금지문자 제거, 쉼표→" · ", 맨 앞 '#' 제거, 윈도우가 저장하지 못하는 <b>끝의 공백·마침표</b> 정리,
+    /// 남은 게 없으면 fallback(레시피 id) 사용.
     ///
     /// <para>이름이 겹치면 뒤엣것에 "-2"부터 번호를 붙인다 — 안 그러면 같은 이름의 팩이
     /// 서로를 조용히 덮어써서 파일 수가 모자란 이유를 알 수 없게 된다. 윈도우 파일
@@ -44,9 +44,14 @@ public static class WildcardWriter
         foreach (var c in raw)
             if (Array.IndexOf(invalid, c) < 0)
                 kept.Append(c);
+        // 파일명이 곧 와일드카드 토큰이라, 선택 목록을 쉼표로 나누는 소비자(VWildCard)에선
+        // 쉼표 든 이름이 두 조각으로 잘려 "파일 없음"이 된다. 같은 이유로 맨 앞 '#'은 비활성 표시로 읽힌다.
+        var name = CommaRun.Replace(kept.ToString(), " · ").TrimStart('#', ' ');
         // 윈도우는 이름 끝의 공백·마침표를 저장하지 못한다(조용히 잘리거나 열리지 않는다).
-        return kept.ToString().TrimEnd(' ', '.').Trim();
+        return name.TrimEnd(' ', '.').Trim();
     }
+
+    private static readonly System.Text.RegularExpressions.Regex CommaRun = new(@"\s*,\s*");
 
     public static void Write(string path, IReadOnlyList<string> lines, WriteMode mode, bool insertBlankLineSeparator)
     {

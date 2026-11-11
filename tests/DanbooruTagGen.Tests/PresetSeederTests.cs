@@ -148,6 +148,45 @@ public class PresetSeederTests
     }
 
     [Fact]
+    public void SyncLeavesIdenticalItemsUntouchedAndUncounted()
+    {
+        // 내용이 같은 항목까지 교체로 세면 퀵 갱신이 매번 "전부 바뀜"이 돼 저장·화면 전체 갱신을 매번 돌렸다.
+        // 교체도 하지 않아야 화면이 들고 있는 객체(편집 중인 미리보기)가 그대로 유지된다.
+        var userPool = new Pool { Id = "p1", Name = "풀", Candidates = { "a" } };
+        var userRecipe = new Recipe { Id = "r1", Name = "팩", DefaultLineCount = 5 };
+        var userPools = new List<Pool> { userPool };
+        var userRecipes = new List<Recipe> { userRecipe };
+        var changed = new List<string>();
+
+        var (updated, _) = PresetSeeder.SyncBundled(
+            userPools, new[] { new Pool { Id = "p1", Name = "풀", Candidates = { "a" } } },
+            userRecipes, new[] { new Recipe { Id = "r1", Name = "팩", DefaultLineCount = 5 } },
+            new HashSet<string> { "p1", "r1" }, changedRecipeIds: changed);
+
+        Assert.Equal(0, updated);
+        Assert.Same(userPool, userPools[0]);
+        Assert.Same(userRecipe, userRecipes[0]);
+        Assert.Empty(changed);
+    }
+
+    [Fact]
+    public void SyncReportsWhichRecipesActuallyChanged()
+    {
+        var userRecipes = new List<Recipe>
+        {
+            new() { Id = "r1", Name = "같음", DefaultLineCount = 5 },
+            new() { Id = "r2", Name = "바뀜", DefaultLineCount = 5 },
+        };
+        var changed = new List<string>();
+
+        PresetSeeder.SyncBundled(new List<Pool>(), Array.Empty<Pool>(), userRecipes,
+            new[] { new Recipe { Id = "r1", Name = "같음", DefaultLineCount = 5 }, new Recipe { Id = "r2", Name = "바뀜", DefaultLineCount = 9 } },
+            new HashSet<string> { "r1", "r2" }, changedRecipeIds: changed);
+
+        Assert.Equal(new[] { "r2" }, changed);
+    }
+
+    [Fact]
     public void SyncDoesNotResurrectDeletedPresets()
     {
         // 사용자가 지운 번들 항목은 Sync가 되살리면 안 된다(Seed의 seed-once 취지 유지).

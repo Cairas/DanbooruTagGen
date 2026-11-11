@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DanbooruTagGen.Core.Models;
 
 namespace DanbooruTagGen.Core.Persistence;
@@ -67,11 +68,15 @@ public static class PresetSeeder
     /// 주의: 사용자가 번들 항목을 직접 수정했다면 그 수정은 덮어써진다(갱신의 의도).
     /// <paramref name="allowRemoval"/>가 false면 교체·복구만 하고 제거는 건너뛴다(자동 경로의
     /// 대량 제거 보류용 — <see cref="CountPendingRemovals"/> 참고).
+    /// <para>내용이 이미 같은 항목은 교체하지도 세지도 않는다 — 퀵 갱신·워처가 파일 하나 바뀔 때마다
+    /// 전부를 "교체됨"으로 세어 매번 저장과 화면 전체 재계산을 돌렸고, 앱 안에서 번들 팩을 고쳐
+    /// 소스에 되쓴 직후의 워처 갱신도 같은 내용으로 객체를 갈아 끼워 편집 중인 화면을 흔들었다.</para>
+    /// <paramref name="changedRecipeIds"/>가 있으면 실제로 교체된 레시피의 (교체 전) id를 담는다.
     /// 반환: (교체된 항목 수, 제거된 항목 수).</summary>
     public static (int Updated, int Removed) SyncBundled(
         List<Pool> userPools, IReadOnlyList<Pool> bundledPools,
         List<Recipe> userRecipes, IReadOnlyList<Recipe> bundledRecipes,
-        ISet<string> seededIds, bool allowRemoval = true)
+        ISet<string> seededIds, bool allowRemoval = true, ICollection<string>? changedRecipeIds = null)
     {
         int updated = 0;
 
@@ -79,6 +84,7 @@ public static class PresetSeeder
         {
             int i = userPools.FindIndex(u => u.Id == pool.Id);
             if (i < 0) continue;                       // 지웠거나 아직 미시딩 → Seed의 몫
+            if (SameContent(userPools[i], pool)) continue;
             userPools[i] = pool;
             updated++;
         }
@@ -88,6 +94,8 @@ public static class PresetSeeder
             int i = userRecipes.FindIndex(u => u.Id == recipe.Id);
             if (i < 0) i = userRecipes.FindIndex(u => u.Name == recipe.Name);
             if (i < 0) continue;
+            if (SameContent(userRecipes[i], recipe)) continue;
+            changedRecipeIds?.Add(userRecipes[i].Id);
             userRecipes[i] = recipe;
             updated++;
         }
@@ -138,6 +146,11 @@ public static class PresetSeeder
 
         return (updated, removed);
     }
+
+    /// <summary>저장 형식(JSON) 기준으로 같은 내용인가. 저장되는 것만 비교하므로 화면용 계산값(배지 등,
+    /// JsonIgnore)은 무시된다. 레시피 하나당 수 KB라 전체 비교도 수십 ms 안쪽이다.</summary>
+    private static bool SameContent<T>(T a, T b) =>
+        string.Equals(JsonSerializer.Serialize(a, JsonStore.Options), JsonSerializer.Serialize(b, JsonStore.Options), StringComparison.Ordinal);
 
     /// <summary><see cref="SyncBundled"/>가 지금 실행되면 제거할 항목 수(아무것도 바꾸지 않음).
     /// 자동 경로(워처·퀵 갱신)는 이 값이 임계값을 넘으면 제거를 보류한다 — 대량 제거는

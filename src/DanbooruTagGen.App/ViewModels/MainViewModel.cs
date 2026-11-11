@@ -115,6 +115,64 @@ public sealed partial class MainViewModel : ObservableObject
         Status = $"태그 {db.Count:N0}개 로드됨";
 
         StartPresetWatcher();
+        StartRulesWatcher();
+    }
+
+    private FileSystemWatcher? _rulesWatcher;
+    private System.Windows.Threading.DispatcherTimer? _rulesReloadDebounce;
+
+    /// <summary>data/conflicts.csv·requires.csv가 바뀌면 앱을 재시작하지 않아도 규칙을 다시 읽는다.
+    /// 컨셉 팩을 만들 때 모순 규칙(표식)을 같이 추가하는 일이 잦은데, 예전엔 시작 시 한 번만 읽어서
+    /// 규칙을 고칠 때마다 재시작해야 했다. 소비자는 모두 매번 Conflicts/Requires 속성을 읽으므로
+    /// 속성만 교체하면 다음 생성·검사부터 새 규칙이 적용된다.</summary>
+    private void StartRulesWatcher()
+    {
+        var dir = Path.GetDirectoryName(AppPaths.ConflictsFile);
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
+
+        _rulesReloadDebounce = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+        _rulesReloadDebounce.Tick += (_, _) =>
+        {
+            _rulesReloadDebounce!.Stop();
+            ReloadRules();
+        };
+
+        void OnChanged(object sender, FileSystemEventArgs e)
+        {
+            if (!string.Equals(e.Name, Path.GetFileName(AppPaths.ConflictsFile), StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(e.Name, Path.GetFileName(AppPaths.RequiresFile), StringComparison.OrdinalIgnoreCase))
+                return;
+            System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                _rulesReloadDebounce!.Stop();
+                _rulesReloadDebounce.Start();
+            });
+        }
+
+        _rulesWatcher = new FileSystemWatcher(dir, "*.csv")
+        {
+            NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+        };
+        _rulesWatcher.Changed += OnChanged;
+        _rulesWatcher.Created += OnChanged;
+        _rulesWatcher.Renamed += OnChanged;
+        _rulesWatcher.EnableRaisingEvents = true;
+    }
+
+    private async void ReloadRules()
+    {
+        try
+        {
+            var conflicts = await Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
+            var requires = await Task.Run(() => Core.Generation.RequiresRules.LoadFromFileOrDefault(AppPaths.RequiresFile));
+            Conflicts = conflicts;
+            Requires = requires;
+            Status = $"모순 규칙 {conflicts.Count}개를 다시 읽었습니다";
+        }
+        catch
+        {
+            // 파일을 쓰는 중이면 읽기에 실패할 수 있다 — 기존 규칙을 유지하고 다음 변경 이벤트에서 다시 시도한다.
+        }
     }
 
     private FileSystemWatcher? _presetWatcher;
@@ -143,7 +201,7 @@ public sealed partial class MainViewModel : ObservableObject
         _presetSyncDebounce.Tick += (_, _) =>
         {
             _presetSyncDebounce!.Stop();
-            QuickSyncBundledPresets();
+            _ = QuickSyncBundledPresetsAsync();
         };
 
         void OnChanged(object sender, FileSystemEventArgs e)
@@ -226,11 +284,37 @@ public sealed partial class MainViewModel : ObservableObject
     /// <summary>확인창·완료 팝업 없이 바로 실행하는 프리셋 갱신. 결과는 하단 상태바(Status)에만
     /// 뜬다. 매번 갱신 버튼을 누르는 반복 작업(레시피/풀 스크립트 편집 중 계속 갱신)이 팝업
     /// 두 개 때문에 번거롭다는 요청으로 추가 — 동작(덮어쓰기 포함)은 기존 버튼과 동일하고
-    /// 확인 절차만 생략한다.</summary>
-    [RelayCommand]
-    private void QuickSyncBundledPresets()
+    /// 확인 절차만 생략한다.
+    /// <para>번들 읽기(파일 수백 개)는 백그라운드에서 하고, 병합·저장·화면 갱신만 UI 스레드에서 한다.
+    /// 읽는 동안 워처나 버튼이 또 부르면 겹쳐 돌리지 않고 끝난 뒤 한 번 더 돈다 — 겹치면 앞선 실행의
+    /// 옛 번들이 나중에 병합돼 방금 저장한 내용을 되돌릴 수 있다.</para></summary>
+    [RelayCommand(AllowConcurrentExecutions = true)]
+    private async Task QuickSyncBundledPresetsAsync()
     {
-        if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out var error))
+        if (_quickSyncRunning) { _quickSyncAgain = true; return; }
+        _quickSyncRunning = true;
+        try
+        {
+            do
+            {
+                _quickSyncAgain = false;
+                var (ok, bundled, error) = await Task.Run(() =>
+                {
+                    bool loaded = BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var b, out var e);
+                    return (loaded, b, e);
+                });
+                ApplyQuickSync(ok, bundled, error);
+            } while (_quickSyncAgain);
+        }
+        finally { _quickSyncRunning = false; }
+    }
+
+    private bool _quickSyncRunning;
+    private bool _quickSyncAgain;
+
+    private void ApplyQuickSync(bool loaded, BundledPresets bundled, string error)
+    {
+        if (!loaded)
         {
             // 워처가 "쓰는 중"인 파일을 잡았거나 편집 도중 JSON이 잠깐 깨진 경우가 대부분이라,
             // 조금 뒤 한 번 더 시도한다. 계속 실패하면 재시도를 멈추고 이유를 남긴다 — 사용자
@@ -257,8 +341,9 @@ public sealed partial class MainViewModel : ObservableObject
         var added = PresetSeeder.Seed(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
         int pendingRemovals = PresetSeeder.CountPendingRemovals(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
         bool holdRemovals = pendingRemovals > removalLimit;
+        var changedRecipeIds = new HashSet<string>(StringComparer.Ordinal);
         var (updated, removed) = PresetSeeder.SyncBundled(
-            Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded, allowRemoval: !holdRemovals);
+            Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded, allowRemoval: !holdRemovals, changedRecipeIds);
         if (added || updated > 0 || removed > 0)
         {
             // 장부(seededIds) 저장 순서는 PresetSeeder.PlanLedgerWrites 참고:
@@ -277,14 +362,17 @@ public sealed partial class MainViewModel : ObservableObject
             // 빌더에 이미 불러와 편집 중인 레시피가 이번 갱신 대상에 포함돼 있으면 화면도
             // 같이 최신으로 맞춘다 — 안 그러면 퀵갱신을 눌러도 빌더에 열어 둔 내용은 그대로
             // 남아 "갱신이 안 먹힌다"는 인상을 준다(2026-08-26).
+            // 실제로 바뀐 팩일 때만 — 다른 팩만 바뀌었는데 다시 불러오면 편집 중인 선택·되돌리기 기록이 흔들린다.
             var loadedId = RecipeBuilder?.LoadedRecipeId;
-            if (!string.IsNullOrEmpty(loadedId))
+            if (!string.IsNullOrEmpty(loadedId) && changedRecipeIds.Contains(loadedId))
             {
                 var fresh = bundled.Recipes.FirstOrDefault(r => r.Id == loadedId);
                 if (fresh != null) RecipeBuilder!.LoadRecipe(fresh);
             }
         }
-        Status = $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}."
+        Status = (added || updated > 0 || removed > 0
+                     ? $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}."
+                     : "프리셋 갱신 — 바뀐 항목 없음.")
                  + (holdRemovals
                      ? $" (번들에서 빠진 항목 {pendingRemovals}개는 자동 제거를 보류 — 의도한 삭제면 \"⟳ 프리셋 갱신\"으로 적용)"
                      : "");

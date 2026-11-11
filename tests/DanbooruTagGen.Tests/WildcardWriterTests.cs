@@ -116,6 +116,22 @@ public class WildcardWriterTests
     }
 
     [Fact]
+    public void ReplacesCommasBecauseWildcardSelectorsSplitEntriesOnThem()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("🔞 MTR (아이를 낳은 유부녀, BBC에게 타락)", "id1"), ("a,b ,  c", "id2") });
+
+        Assert.Equal(new[] { "🔞 MTR (아이를 낳은 유부녀 · BBC에게 타락)", "a · b · c" }, names);
+    }
+
+    [Fact]
+    public void StripsLeadingHashBecauseWildcardSelectorsReadItAsDisabled()
+    {
+        var names = WildcardWriter.ToFileNames(new[] { ("# 촉수", "id1") });
+
+        Assert.Equal("촉수", names[0]);
+    }
+
+    [Fact]
     public void TrimsTrailingDotsAndSpacesThatWindowsCannotStore()
     {
         var names = WildcardWriter.ToFileNames(new[] { ("이름... ", "id1") });

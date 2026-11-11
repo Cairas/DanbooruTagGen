@@ -717,15 +717,25 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
 
     /// <summary>Recipes 전체의 검증 배지(모순·시각 다양성)를 다시 계산한다. 목록이 통째로
     /// 바뀔 때(생성자, Refresh, 복제/새로 저장)만 부르면 되고, 검색어 입력 같은 필터링에서는
-    /// 다시 계산할 필요 없다 — RefreshFilter는 이미 계산된 값을 그대로 보여주기만 한다.</summary>
+    /// 다시 계산할 필요 없다 — RefreshFilter는 이미 계산된 값을 그대로 보여주기만 한다.
+    /// <para>계산은 레시피마다 독립이라 병렬로 돌린다. UI 스레드는 끝날 때까지 기다리므로 그동안 레시피·풀이
+    /// 바뀔 일이 없고(읽기만 함), 결과 대입은 다 끝난 뒤 UI 스레드에서 한다.</para></summary>
     private void RefreshBadges()
     {
         var poolsById = _main.Pools.ToDictionary(p => p.Id);
-        foreach (var r in Recipes)
+        var recipes = Recipes.ToArray();
+        var conflict = new string[recipes.Length];
+        var variety = new string[recipes.Length];
+        Parallel.For(0, recipes.Length, i =>
         {
-            r.ConflictBadge = ComputeConflictBadge(r);
-            r.VarietyBadge = ComputeVarietyBadge(r, poolsById);
-            r.OriginBadge = _main.IsBundled(r.Id) ? "📦" : "";
+            conflict[i] = ComputeConflictBadge(recipes[i], poolsById);
+            variety[i] = ComputeVarietyBadge(recipes[i], poolsById);
+        });
+        for (int i = 0; i < recipes.Length; i++)
+        {
+            recipes[i].ConflictBadge = conflict[i];
+            recipes[i].VarietyBadge = variety[i];
+            recipes[i].OriginBadge = _main.IsBundled(recipes[i].Id) ? "📦" : "";
         }
     }
 
@@ -739,7 +749,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
 
     /// <summary>레시피 하나의 모순 배지 계산. RecipeBuilderViewModel.RefreshConflicts와 같은
     /// 방식(슬롯 단위, MaxCount 반영)으로 점검하되 문구 대신 목록용 짧은 기호만 돌려준다.</summary>
-    private string ComputeConflictBadge(Recipe recipe)
+    private string ComputeConflictBadge(Recipe recipe, IReadOnlyDictionary<string, Core.Models.Pool> poolsById)
     {
         if (_main.Conflicts.Count == 0) return "";
 
@@ -755,7 +765,8 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
             else if (slot is RandomPoolSlot r)
             {
                 var tags = new List<string>(r.Tags);
-                foreach (var pool in ResolveSlotPools(slot)) tags.AddRange(pool.Candidates);
+                foreach (var id in r.ExtraPoolIds.Prepend(r.PoolId))
+                    if (!string.IsNullOrEmpty(id) && poolsById.TryGetValue(id, out var pool)) tags.AddRange(pool.Candidates);
                 specs.Add(new(tags, r.MaxCount, IsFixed: false));
             }
             else if (slot is AlternativeSlot alt && alt.Groups.Count > 0)
@@ -780,7 +791,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         var snapshot = Clone(_main.RecipeBuilder.BuildRecipe());
         snapshot.Name = $"레시피 {Recipes.Count + 1}";
         var poolsById = _main.Pools.ToDictionary(p => p.Id);
-        snapshot.ConflictBadge = ComputeConflictBadge(snapshot);
+        snapshot.ConflictBadge = ComputeConflictBadge(snapshot, poolsById);
         snapshot.VarietyBadge = ComputeVarietyBadge(snapshot, poolsById);
         Recipes.Add(snapshot);
         RefreshFilter();
