@@ -117,10 +117,35 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
     {
         var p = new Pool { Name = "새 풀" };
         Pools.Add(p);
+        SyncToMain();
         // 검색어가 걸려 있으면 새 풀이 필터에 안 잡혀 화면에서 사라진다 — 검색을 비워 바로 보이게 한다.
         PoolSearchText = "";
         RefreshPoolFilter();
         SelectedPool = p;
+    }
+
+    /// <summary>MainViewModel.Pools가 바깥에서 바뀐 뒤(번들 프리셋 갱신) 다시 읽는다.
+    /// <para>왜: Pools는 앱 시작 때 뜬 사본이라, 워처가 번들 풀을 새 객체로 교체·추가해도 이 목록은 시작 시점
+    /// 그대로였다. 그 상태로 풀 창을 열었다 닫으면 Persist가 옛 목록을 되써서 갱신이 되돌려지고, 그사이
+    /// 새로 시딩된 풀은 사용자 데이터에서 빠졌다(시딩 장부엔 남아 다시 들어오지도 않는다).</para></summary>
+    public void Refresh()
+    {
+        var selectedId = SelectedPool?.Id;
+        Pools.Clear();
+        foreach (var p in _main.Pools) Pools.Add(p);
+        RefreshPoolFilter();
+        if (selectedId != null)
+            SelectedPool = FilteredPools.FirstOrDefault(p => p.Id == selectedId);
+    }
+
+    /// <summary>풀 추가·삭제를 바로 MainViewModel과 디스크에 반영한다(창을 닫을 때까지 미루지 않는다) —
+    /// 미루는 사이 번들 갱신이 <see cref="Refresh"/>로 목록을 다시 읽으면 방금 만든/지운 풀이 되돌려진다.</summary>
+    private void SyncToMain()
+    {
+        _main.Pools.Clear();
+        _main.Pools.AddRange(Pools);
+        _main.SavePools();
+        _main.RecipeBuilder?.RefreshPools();
     }
 
     /// <summary>바깥(레시피 빌더의 "슬롯을 풀로 저장")에서 만든 풀을 목록에 넣는다.
@@ -155,6 +180,7 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
         if (confirm != System.Windows.MessageBoxResult.Yes) return;
 
         Pools.Remove(SelectedPool);
+        SyncToMain();
         RefreshPoolFilter();
         _main.Status = $"풀 '{name}' 삭제됨";
     }
@@ -176,9 +202,7 @@ public sealed partial class PoolLibraryViewModel : ObservableObject
     /// 추가/삭제나 풀 이름 변경이 사라지지 않게 하는 안전망 역할을 한다.</summary>
     public void Persist()
     {
-        _main.Pools.Clear();
-        _main.Pools.AddRange(Pools);
-        _main.SavePools();
+        SyncToMain();
         _main.Status = "풀 저장됨";
     }
 

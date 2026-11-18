@@ -78,7 +78,45 @@ public sealed record ConflictHit(string Label, IReadOnlyList<string> Tags);
 /// 같은 AltGroupOwnerId를 가진 다른 그룹의 태그와는 정확히 하나만 뽑히므로 절대 같이 못
 /// 나온다(충돌 아님) — 이 구분이 없으면 그룹을 전부 합쳐 봐서 원래 같이 나올 수 없는 조합도
 /// "가끔 충돌"로 오탐하게 된다.</summary>
-public sealed record SlotSpec(IReadOnlyList<string> Tags, int MaxCount, bool IsFixed, int? AltGroupOwnerId = null);
+public sealed record SlotSpec(IReadOnlyList<string> Tags, int MaxCount, bool IsFixed, int? AltGroupOwnerId = null)
+{
+    /// <summary>레시피 슬롯들을 <see cref="ConflictRules.AnalyzeRecipe(IReadOnlyList{SlotSpec})"/>용 요약으로 바꾼다.
+    /// 레시피 빌더의 실시간 경고와 라이브러리 배지가 같은 기준을 쓰도록 한 곳에 둔다(예전엔 두 화면에 복사본이
+    /// 따로 있었다). 생성기와 같은 기준으로:
+    /// <list type="bullet">
+    /// <item>꺼 둔 슬롯은 출력되지 않으므로 뺀다.</item>
+    /// <item>랜덤 풀 후보는 <see cref="WildcardGenerator.ResolveCandidates"/>(인라인 + 풀 + 체이닝, 중복 제거) 그대로.</item>
+    /// <item>가중치 0인 ALT 그룹은 절대 안 뽑히므로 뺀다 — <c>tools/conflict_scan.py</c>도 같은 기준이다. 넣으면 "없음"
+    /// 분기 같은 비활성 그룹이 일으키지도 않는 모순을 "가끔"/"항상"으로 오탐한다.</item>
+    /// </list></summary>
+    public static IReadOnlyList<SlotSpec> FromSlots(IEnumerable<Models.Slot> slots, IReadOnlyDictionary<string, Models.Pool> poolsById)
+    {
+        var specs = new List<SlotSpec>();
+        int nextAltOwnerId = 0;
+        foreach (var slot in slots)
+        {
+            if (!slot.IsEnabled) continue;
+            switch (slot)
+            {
+                case Models.FixedSlot f:
+                    specs.Add(new SlotSpec(f.Tags.ToList(), f.Tags.Count, IsFixed: true));
+                    break;
+                case Models.RandomPoolSlot r:
+                    specs.Add(new SlotSpec(WildcardGenerator.ResolveCandidates(r, poolsById), r.MaxCount, IsFixed: false));
+                    break;
+                case Models.AlternativeSlot alt when alt.Groups.Count > 0:
+                    // 그룹 하나가 통째로 뽑혀서 다른 그룹 태그와는 절대 안 섞인다. 그룹마다 별도 SlotSpec을 만들고
+                    // 같은 AltGroupOwnerId를 줘 "같은 슬롯의 다른 그룹끼리는 동시 등장 불가"를 알린다.
+                    int ownerId = nextAltOwnerId++;
+                    foreach (var g in alt.Groups)
+                        if (g.Weight > 0)
+                            specs.Add(new SlotSpec(g.Tags.ToList(), g.Tags.Count, IsFixed: false, ownerId));
+                    break;
+            }
+        }
+        return specs;
+    }
+}
 
 public enum ConflictSeverity { Definite, Possible }
 
@@ -130,6 +168,9 @@ public sealed class ConflictRules
 
     private sealed class KeyedGroup
     {
+        /// <summary><see cref="_keyed"/> 안의 위치. 인덱스로 추린 규칙을 원래(파일) 순서로 되돌려 결과 순서를
+        /// 전수 순회 때와 똑같이 유지하는 데 쓴다.</summary>
+        public required int Index { get; init; }
         public required ConflictGroup Group { get; init; }
         public required Member[] Members { get; init; }
         public required string[] ExceptKeys { get; init; }
@@ -176,7 +217,7 @@ public sealed class ConflictRules
     public ConflictRules(IEnumerable<ConflictGroup> groups)
     {
         _groups = groups.ToList();
-        _keyed = _groups.Select(BuildKeyed).ToList();
+        _keyed = _groups.Select((g, i) => BuildKeyed(g, i)).ToList();
         foreach (var g in _keyed)
             foreach (var m in g.Members)
             {
@@ -189,7 +230,7 @@ public sealed class ConflictRules
     /// (table:1.2)) 하나로 합친다 — 안 그러면 태그 하나만 있어도 "2개 이상"으로 세어 오탐한다.
     /// 편 나눔에서 같은 키가 두 편에 있으면 그 태그 하나만으로 "두 편이 다 있음"이 돼 항상 충돌하므로
     /// 잘못된 규칙이다 — 조용히 넘기지 않고 예외(파일 로드는 <see cref="LoadFromFile"/>이 미리 걸러 건너뛴다).</summary>
-    private static KeyedGroup BuildKeyed(ConflictGroup g)
+    private static KeyedGroup BuildKeyed(ConflictGroup g, int index)
     {
         var exceptKeys = (g.Except ?? Array.Empty<string>()).Select(TagKey.KeyOf).ToArray();
         Member[] members;
@@ -231,7 +272,30 @@ public sealed class ConflictRules
                     .Select((m, i) => new Member(m.Name, m.Key, i, 1)).ToArray();
                 break;
         }
-        return new KeyedGroup { Group = g, Members = members, ExceptKeys = exceptKeys };
+        return new KeyedGroup { Index = index, Group = g, Members = members, ExceptKeys = exceptKeys };
+    }
+
+    /// <summary><paramref name="keys"/>에 멤버가 하나라도 있는 규칙들(원래 순서, 중복 없음).
+    /// <para>왜: 규칙이 9천 개를 넘으면서 줄 하나(재추첨마다)를 검사할 때 전 규칙을 훑는 비용이 생성 시간의 94%를
+    /// 차지했다(298팩 × 4옵션 × 60줄: 80초 중 75초, 2026-11-18 실측). 멤버가 하나도 없는 규칙은 절대 깨질 수 없다 —
+    /// 상호배타·편 나눔은 멤버 둘 이상, 예산은 멤버 비용 합 &gt; 예산(≥0)이 필요하고, 면제·다인수 마커는 억제만 한다.
+    /// 그래서 줄에 나온 키의 역인덱스로 추린 규칙만 봐도 결과가 전수 순회와 정확히 같다.</para>
+    /// 시간: O(줄 키 수 × 키당 규칙 수 + 후보 규칙 수 log 후보 규칙 수) — 규칙 총수와 무관하다.</summary>
+    private List<KeyedGroup> GroupsTouching(IEnumerable<string> keys)
+    {
+        var result = new List<KeyedGroup>();
+        HashSet<int>? seen = null;
+        foreach (var key in keys)
+        {
+            if (!_byMemberKey.TryGetValue(key, out var groups)) continue;
+            foreach (var g in groups)
+            {
+                seen ??= new HashSet<int>();
+                if (seen.Add(g.Index)) result.Add(g);
+            }
+        }
+        if (result.Count > 1) result.Sort((a, b) => a.Index.CompareTo(b.Index));
+        return result;
     }
 
     public static ConflictRules Empty { get; } = new(Array.Empty<ConflictGroup>());
@@ -357,9 +421,10 @@ public sealed class ConflictRules
     /// 각 문자열은 <see cref="TagKey"/>로 분해한 판정 키로 비교한다.</summary>
     public IReadOnlyList<ConflictHit> Detect(IEnumerable<string> tags)
     {
-        var keys = new KeyView(TagKey.KeySet(tags));
+        var set = TagKey.KeySet(tags);
+        var keys = new KeyView(set);
         var hits = new List<ConflictHit>();
-        foreach (var g in _keyed)
+        foreach (var g in GroupsTouching(set))
         {
             if (g.IsSuppressed(keys) || !g.Violated(keys)) continue;
             hits.Add(new ConflictHit(g.Group.Label, g.PresentIn(keys)));
@@ -367,11 +432,18 @@ public sealed class ConflictRules
         return hits;
     }
 
+    /// <summary>재추첨 루프의 판정이라 가장 자주 불린다. 결과가 참/거짓뿐이라 <see cref="GroupsTouching"/>의
+    /// 정렬·중복 제거도 생략한다 — 멤버가 여럿 나온 규칙은 몇 번 다시 보지만, 그 비용이 집합 할당보다 싸다.</summary>
     public bool HasConflict(IEnumerable<string> tags)
     {
-        var keys = new KeyView(TagKey.KeySet(tags));
-        foreach (var g in _keyed)
-            if (!g.IsSuppressed(keys) && g.Violated(keys)) return true;
+        var set = TagKey.KeySet(tags);
+        var keys = new KeyView(set);
+        foreach (var key in set)
+        {
+            if (!_byMemberKey.TryGetValue(key, out var groups)) continue;
+            foreach (var g in groups)
+                if (!g.IsSuppressed(keys) && g.Violated(keys)) return true;
+        }
         return false;
     }
 
@@ -414,10 +486,12 @@ public sealed class ConflictRules
     /// always에서 깨지면 Definite(항상 충돌), reachable에서 깨지면 Possible.</summary>
     public IReadOnlyList<RecipeConflict> AnalyzeRecipe(IEnumerable<string> alwaysTags, IEnumerable<string> reachableTags)
     {
-        var always = new KeyView(TagKey.KeySet(alwaysTags));
-        var reachable = new KeyView(TagKey.KeySet(reachableTags));
+        var alwaysSet = TagKey.KeySet(alwaysTags);
+        var reachableSet = TagKey.KeySet(reachableTags);
+        var always = new KeyView(alwaysSet);
+        var reachable = new KeyView(reachableSet);
         var result = new List<RecipeConflict>();
-        foreach (var g in _keyed)
+        foreach (var g in GroupsTouching(alwaysSet.Concat(reachableSet)))
         {
             if (g.Violated(always))
             {
@@ -476,7 +550,8 @@ public sealed class ConflictRules
 
         bool fixedMultiPerson = fixedTags.Overlaps(MultiPersonMarkers);
         var result = new List<RecipeConflict>();
-        foreach (var g in _keyed)
+        // 멤버가 하나도 reachable에 없는 규칙은 아래 첫 검사에서 어차피 건너뛰므로, 역인덱스로 미리 추려 순회한다.
+        foreach (var g in GroupsTouching(reachable))
         {
             int reachableMembers = 0;
             foreach (var m in g.Members) if (reachable.Contains(m.Key)) reachableMembers++;

@@ -641,8 +641,11 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     }
 
     /// <summary>빌더 상태를 건드리지 않고 선택 레시피만으로 5줄 뽑아 보여준다. 생성 탭의
-    /// 사용자 설정과 무관하게 합리적인 기본값(중복 회피·모순 회피 켜짐, 균등 추첨)을 쓴다 —
-    /// "부족한 점 훑어보기" 용도라 매번 옵션을 맞출 필요가 없게.</summary>
+    /// 사용자 설정과 무관하게 합리적인 기본값(중복 회피·모순 회피·슬롯 단위 로컬 필터 켜짐, 균등 추첨)을 쓴다 —
+    /// "부족한 점 훑어보기" 용도라 매번 옵션을 맞출 필요가 없게.
+    /// <para>로컬 필터를 켜는 이유: 단계 게이팅(implies 표식 + 모순 규칙)을 쓰는 팩은 줄 단위 재추첨만으로는
+    /// 모순을 거의 못 피한다(실측: 일부 팩은 60줄 중 50~58줄에 모순이 남음, 로컬 필터를 켜면 0줄). 꺼 둔 채
+    /// 미리보기를 보여 주면 실제 생성(로컬 필터 켬)과 전혀 다른 깨진 줄을 보고 판단하게 된다.</para></summary>
     [RelayCommand]
     private void QuickPreview()
     {
@@ -650,7 +653,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         try
         {
             var pools = _main.Pools.ToDictionary(p => p.Id);
-            var opts = new Core.Models.GenerationOptions { LineCount = 5, Seed = Random.Shared.Next() };
+            var opts = new Core.Models.GenerationOptions { LineCount = 5, Seed = Random.Shared.Next(), LocalConflictFiltering = true };
             var generator = new Core.Generation.WildcardGenerator();
             var result = generator.Generate(SelectedRecipe, pools, opts, _main.Conflicts, _main.TagInfo);
             QuickPreviewText = string.Join("\n", result.Lines);
@@ -753,32 +756,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     {
         if (_main.Conflicts.Count == 0) return "";
 
-        var specs = new List<Core.Generation.SlotSpec>();
-        int nextAltOwnerId = 0;
-        foreach (var slot in recipe.Slots)
-        {
-            if (!slot.IsEnabled) continue;
-            if (slot is FixedSlot f)
-            {
-                specs.Add(new(f.Tags.ToList(), f.Tags.Count, IsFixed: true));
-            }
-            else if (slot is RandomPoolSlot r)
-            {
-                var tags = new List<string>(r.Tags);
-                foreach (var id in r.ExtraPoolIds.Prepend(r.PoolId))
-                    if (!string.IsNullOrEmpty(id) && poolsById.TryGetValue(id, out var pool)) tags.AddRange(pool.Candidates);
-                specs.Add(new(tags, r.MaxCount, IsFixed: false));
-            }
-            else if (slot is AlternativeSlot alt && alt.Groups.Count > 0)
-            {
-                // RecipeBuilderViewModel.RefreshConflicts와 동일한 이유로 그룹별로 쪼갠다.
-                int ownerId = nextAltOwnerId++;
-                foreach (var g in alt.Groups)
-                    specs.Add(new(g.Tags.ToList(), g.Tags.Count, IsFixed: false, ownerId));
-            }
-        }
-
-        var hits = _main.Conflicts.AnalyzeRecipe(specs);
+        var hits = _main.Conflicts.AnalyzeRecipe(Core.Generation.SlotSpec.FromSlots(recipe.Slots, poolsById));
         if (hits.Count == 0) return "";
         return hits.Any(h => h.Severity == Core.Generation.ConflictSeverity.Definite) ? "‼" : "⚠";
     }
@@ -794,6 +772,8 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         snapshot.ConflictBadge = ComputeConflictBadge(snapshot, poolsById);
         snapshot.VarietyBadge = ComputeVarietyBadge(snapshot, poolsById);
         Recipes.Add(snapshot);
+        SyncToMain();
+        RefreshCategories();
         RefreshFilter();
         SelectedRecipe = FilteredRecipes.Contains(snapshot) ? snapshot : SelectedRecipe;
         _main.Status = $"현재 구성을 '{snapshot.Name}'(으)로 저장했습니다.";
@@ -817,6 +797,7 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         copy.VarietyBadge = SelectedRecipe.VarietyBadge;
         var insertAt = Recipes.IndexOf(SelectedRecipe) + 1;
         Recipes.Insert(insertAt, copy);
+        SyncToMain();
         RefreshFilter();
         if (FilteredRecipes.Contains(copy)) SelectedRecipe = copy;
         _main.Status = $"'{copy.Name}'(으)로 복제했습니다.";
@@ -850,6 +831,8 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         if (confirm != System.Windows.MessageBoxResult.Yes) return;
 
         Recipes.Remove(SelectedRecipe);
+        SyncToMain();
+        RefreshCategories();
         RefreshFilter();
         _main.Status = $"레시피 '{name}' 삭제됨";
     }
@@ -904,9 +887,30 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     /// 깜빡 잊고 저장 안 눌러도 사라지지 않게 하는 안전망 역할을 한다.</summary>
     public void Persist()
     {
+        SyncToMain();
+        _main.Status = "레시피 라이브러리 저장됨";
+    }
+
+    /// <summary>목록 구조 변경(새로 저장·복제·삭제)을 바로 MainViewModel·디스크·일괄 생성 목록에 반영한다.
+    /// <para>왜: 예전엔 창을 닫을 때(Persist)까지 미뤘는데, 그사이 워처가 번들을 갱신하면 <see cref="Refresh"/>가
+    /// MainViewModel.SavedRecipes로 목록을 다시 채워 방금 복제·저장한 레시피가 사라지고 지운 레시피가 되살아났다.
+    /// 데이터를 다루는 스크립트를 앱을 켠 채 돌리는 작업 방식이라 실제로 겹치는 타이밍이다.</para></summary>
+    private void SyncToMain()
+    {
         _main.SavedRecipes.Clear();
         _main.SavedRecipes.AddRange(Recipes);
         _main.SaveRecipeLibrary();
-        _main.Status = "레시피 라이브러리 저장됨";
+        _main.Generation?.RefreshBatchRecipes();
+    }
+
+    /// <summary>모순 규칙 파일이 다시 읽힌 뒤 배지만 새 규칙으로 다시 계산한다(목록 구성은 그대로).</summary>
+    public void RefreshConflictBadges()
+    {
+        var selectedId = SelectedRecipe?.Id;
+        RefreshBadges();
+        // Recipe는 변경 통지를 안 하므로 목록을 다시 채워야 배지가 다시 그려진다.
+        RefreshFilter();
+        if (selectedId != null && SelectedRecipe?.Id != selectedId)
+            SelectedRecipe = FilteredRecipes.FirstOrDefault(r => r.Id == selectedId);
     }
 }

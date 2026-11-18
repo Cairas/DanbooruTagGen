@@ -123,8 +123,23 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         }
     }
 
-    private void SubscribeGroup(AlternativeGroup g) => g.Tags.CollectionChanged += OnSlotTagsChanged;
-    private void UnsubscribeGroup(AlternativeGroup g) => g.Tags.CollectionChanged -= OnSlotTagsChanged;
+    private void SubscribeGroup(AlternativeGroup g)
+    {
+        g.Tags.CollectionChanged += OnSlotTagsChanged;
+        g.PropertyChanged += OnGroupPropertyChanged;
+    }
+
+    private void UnsubscribeGroup(AlternativeGroup g)
+    {
+        g.Tags.CollectionChanged -= OnSlotTagsChanged;
+        g.PropertyChanged -= OnGroupPropertyChanged;
+    }
+
+    /// <summary>가중치 0인 그룹은 모순 점검에서 빠지므로(SlotSpec.FromSlots) 가중치가 바뀌면 다시 계산한다.</summary>
+    private void OnGroupPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(AlternativeGroup.Weight)) RefreshConflicts();
+    }
 
     /// <summary>대안 슬롯의 그룹 자체가 추가/삭제될 때(그룹 안의 태그 변경이 아니라) 그 그룹의
     /// 태그 컬렉션 구독을 같이 걸고/떼고, 모순도 다시 계산한다.</summary>
@@ -217,10 +232,30 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         _main.Status = "레시피 저장됨";
     }
 
+    private bool _warningRefreshPending;
+
+    /// <summary>모순·다양성 경고 재계산을 예약한다. 같은 UI 작업 안에서 여러 번 불려도 한 번만 계산한다.
+    /// <para>왜: 레시피 불러오기·되돌리기는 슬롯을 하나씩 Add해서 슬롯 수만큼 CollectionChanged가 오고, 태그
+    /// 추가 경로는 직접 호출 + 컬렉션 구독으로 두 번씩 불렀다. 계산 한 번이 규칙 수천 개 × 슬롯 분석이라
+    /// 20슬롯 레시피를 불러오면 UI 스레드에서 같은 계산을 20번 넘게 반복했다. Background 우선순위로 미루면
+    /// 그 작업의 컬렉션 변경이 다 끝난 뒤 최종 상태로 한 번만 돈다.</para></summary>
+    public void RefreshConflicts()
+    {
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is null) { RecomputeWarnings(); return; }
+        if (_warningRefreshPending) return;
+        _warningRefreshPending = true;
+        dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, () =>
+        {
+            _warningRefreshPending = false;
+            RecomputeWarnings();
+        });
+    }
+
     /// <summary>현재 레시피가 만들 수 있는 모순을 미리 점검해 경고 문구를 갱신한다.
     /// 고정 태그끼리는 '항상', 풀 후보까지 포함하면 '가끔' 충돌로 표시. 시각 다양성 경고도
     /// 슬롯이 바뀔 때마다 같이 갱신한다(호출 지점이 전부 겹치므로).</summary>
-    public void RefreshConflicts()
+    private void RecomputeWarnings()
     {
         RefreshVarietyWarning();
 
@@ -229,44 +264,8 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
 
         // 슬롯 단위로 넘겨 MaxCount를 반영한다: MaxCount=1인 풀 안의 상호배타 태그(예: 시선
         // 풀의 looking_up/looking_down)는 하나만 뽑히므로 서로 충돌로 잡히지 않는다.
-        var specs = new List<Core.Generation.SlotSpec>();
-        int nextAltOwnerId = 0;
-        foreach (var slot in Slots)
-        {
-            if (!slot.IsEnabled) continue; // 꺼둔 슬롯은 출력 안 되니 모순 계산에서도 제외
-
-            if (slot is FixedSlot f)
-            {
-                specs.Add(new(f.Tags.ToList(), f.Tags.Count, IsFixed: true));
-            }
-            else if (slot is RandomPoolSlot r)
-            {
-                // WildcardGenerator.ResolveCandidates와 동일하게 인라인 태그 + 체이닝된 풀(들) 후보를 합친다.
-                var tags = new List<string>(r.Tags);
-                if (!string.IsNullOrEmpty(r.PoolId))
-                {
-                    var pool = _main.Pools.FirstOrDefault(p => p.Id == r.PoolId);
-                    if (pool != null) tags.AddRange(pool.Candidates);
-                }
-                foreach (var extraId in r.ExtraPoolIds)
-                {
-                    var extraPool = _main.Pools.FirstOrDefault(p => p.Id == extraId);
-                    if (extraPool != null) tags.AddRange(extraPool.Candidates);
-                }
-                specs.Add(new(tags, r.MaxCount, IsFixed: false));
-            }
-            else if (slot is AlternativeSlot alt && alt.Groups.Count > 0)
-            {
-                // 그룹 하나가 통째로 뽑혀서 다른 그룹 태그와는 절대 안 섞인다. 그룹마다 별도
-                // SlotSpec을 만들고 같은 AltGroupOwnerId를 부여해 AnalyzeRecipe가 "같은 슬롯의
-                // 다른 그룹끼리는 동시 등장 불가"를 알게 한다(합쳐서 근사하면 오탐이 난다).
-                int ownerId = nextAltOwnerId++;
-                foreach (var g in alt.Groups)
-                    specs.Add(new(g.Tags.ToList(), g.Tags.Count, IsFixed: false, ownerId));
-            }
-        }
-
-        var hits = rules.AnalyzeRecipe(specs);
+        // 라이브러리 배지와 같은 기준(SlotSpec.FromSlots)을 써야 두 화면의 경고가 어긋나지 않는다.
+        var hits = rules.AnalyzeRecipe(Core.Generation.SlotSpec.FromSlots(Slots, _main.Pools.ToDictionary(p => p.Id)));
         if (hits.Count == 0) { ConflictWarning = ""; return; }
 
         var parts = hits.Select(h =>

@@ -97,6 +97,77 @@ public class WildcardWriterTests
         finally { File.Delete(path); }
     }
 
+    [Fact]
+    public void AppendCreatesMissingFile()
+    {
+        var path = Temp();
+        try
+        {
+            WildcardWriter.Write(path, new[] { "a", "b" }, WriteMode.Append, true);
+            Assert.Equal("a\nb", File.ReadAllText(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void AppendLeavesExistingBytesUntouched()
+    {
+        // 덧붙이기는 기존 내용(UTF-8 BOM 포함)을 다시 쓰지 않는다 — 기존 바이트가 그대로 앞에 남아야 한다.
+        var path = Temp();
+        try
+        {
+            var original = new byte[] { 0xEF, 0xBB, 0xBF, (byte)'a', (byte)'\r', (byte)'\n' };
+            File.WriteAllBytes(path, original);
+            WildcardWriter.Write(path, new[] { "한글" }, WriteMode.Append, false);
+            var bytes = File.ReadAllBytes(path);
+            Assert.Equal(original, bytes[..original.Length]);
+            Assert.Equal("a\r\n한글", File.ReadAllText(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void AppendToBomOnlyFileHasNoLeadingBlank()
+    {
+        var path = Temp();
+        try
+        {
+            File.WriteAllBytes(path, new byte[] { 0xEF, 0xBB, 0xBF });
+            WildcardWriter.Write(path, new[] { "c" }, WriteMode.Append, true);
+            Assert.Equal("c", File.ReadAllText(path));
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void AppendToUtf16FileRewritesAsUtf8WithoutCorruption()
+    {
+        var path = Temp();
+        try
+        {
+            File.WriteAllText(path, "a\nb", Encoding.Unicode);
+            WildcardWriter.Write(path, new[] { "c" }, WriteMode.Append, false);
+            Assert.Equal("a\nb\nc", File.ReadAllText(path));
+            Assert.NotEqual(0xFF, File.ReadAllBytes(path)[0]);   // UTF-8로 다시 썼다
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
+    public void OverwriteAndNewLeaveNoTempFileBehind()
+    {
+        var path = Temp();
+        try
+        {
+            WildcardWriter.Write(path, new[] { "a" }, WriteMode.New, false);
+            File.WriteAllText(path, "old");
+            WildcardWriter.Write(path, new[] { "b" }, WriteMode.Overwrite, false);
+            Assert.Equal("b", File.ReadAllText(path));
+            Assert.False(File.Exists(path + ".tmp"));
+        }
+        finally { File.Delete(path); }
+    }
+
     // ── 레시피별 파일 분리 출력용 파일명 만들기 ──────────────────────────
 
     [Fact]

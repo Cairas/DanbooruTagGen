@@ -158,9 +158,6 @@ public sealed partial class GenerationViewModel : ObservableObject
         RefreshBatchItems();
     }
 
-    /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
-    /// 축 라벨·Labels)까지 훑으므로 "netorare" 같은 실제 태그명으로도 걸린다. _allBatchItems가
-    /// 마스터라 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
     /// <summary>체크리스트에 뿌릴 레시피를 순서대로 준다. 레시피 라이브러리 창과 같은 규칙을
     /// 써야 두 화면의 순서가 어긋나지 않는다 — "테스트" 라벨이 붙은 팩만 맨 아래로 내리고,
     /// 나머지는 recipes.json 배열 순서를 그대로 둔다.</summary>
@@ -187,6 +184,9 @@ public sealed partial class GenerationViewModel : ObservableObject
             : hidden > 0 ? $"체크 {total}개 (검색에 가려진 {hidden}개 포함)" : $"체크 {total}개";
     }
 
+    /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
+    /// 축 라벨·Labels)까지 훑으므로 "netorare" 같은 실제 태그명으로도 걸린다. _allBatchItems가
+    /// 마스터라 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
     private void RefreshBatchItems()
     {
         BatchItems.Clear();
@@ -461,12 +461,12 @@ public sealed partial class GenerationViewModel : ObservableObject
         System.Text.Json.JsonSerializer.Deserialize<Recipe>(
             System.Text.Json.JsonSerializer.Serialize(recipe, JsonStore.Options), JsonStore.Options)!;
 
-    /// <summary>UI 스레드에서만 할 수 있는 일(슬롯·체크 상태·풀 읽기, 시드 확정)을 먼저 끝내
-    /// 백그라운드가 건드릴 게 없는 스냅샷으로 만든다.</summary>
     /// <summary>후보가 없어 건너뛴 훅의 이름들. 생성이 끝난 뒤 상태 메시지로 알린다 —
     /// 조용히 빠지면 "훅을 켰는데 왜 안 나오지"가 된다.</summary>
     private IReadOnlyList<string> _skippedHooks = Array.Empty<string>();
 
+    /// <summary>UI 스레드에서만 할 수 있는 일(슬롯·체크 상태·풀 읽기, 시드 확정)을 먼저 끝내
+    /// 백그라운드가 건드릴 게 없는 스냅샷으로 만든다.</summary>
     private GenerationJob BuildJob(int lineCountEach)
     {
         var opts = BuildOptions();
@@ -578,20 +578,10 @@ public sealed partial class GenerationViewModel : ObservableObject
     }
 
     /// <summary>줄 수와 시드만 바꾼 사본. 백그라운드에서 뷰모델 속성을 다시 읽지 않으려고
-    /// 스냅샷의 값만으로 만든다.</summary>
-    private static GenerationOptions CopyWith(GenerationOptions o, int lineCount, int seed) => new()
-    {
-        LineCount = lineCount,
-        Seed = seed,
-        DedupeWithinLine = o.DedupeWithinLine,
-        AvoidDuplicateLines = o.AvoidDuplicateLines,
-        AvoidConflicts = o.AvoidConflicts,
-        LocalConflictFiltering = o.LocalConflictFiltering,
-        UnderscoreToSpace = o.UnderscoreToSpace,
-        Sampling = o.Sampling,
-        AutoOrderTags = o.AutoOrderTags,
-        Blocklist = o.Blocklist,
-    };
+    /// 스냅샷의 값만으로 만든다. 레코드 복사(with)라 GenerationOptions에 옵션이 늘어도 여기서 빠뜨릴 수 없다 —
+    /// 예전엔 필드를 손으로 옮겨 적어서, 새 옵션을 여기 안 적으면 일괄 생성에서만 조용히 꺼졌다.</summary>
+    private static GenerationOptions CopyWith(GenerationOptions o, int lineCount, int seed) =>
+        o with { LineCount = lineCount, Seed = seed };
 
     /// <summary>스냅샷을 백그라운드에서 돌리고 진행률을 UI로 보고한다. 예전엔 생성이 UI
     /// 스레드에서 통째로 돌아, 레시피 수십 개 × 수백 줄이면 창이 몇 초씩 응답하지 않았다.</summary>
@@ -730,6 +720,18 @@ public sealed partial class GenerationViewModel : ObservableObject
                 var files = outputs.Select((o, i) =>
                     (Path: Path.Combine(folder, names[i] + ".txt"),
                      Lines: ApplyQualityTags(o.Result).Lines)).ToList();
+                // "새 파일" 모드는 이미 있는 파일에서 예외로 멈춘다 — 쓰는 도중에 걸리면 앞쪽 파일만 써진 반쪽 결과가
+                // 남으므로, 하나라도 겹치면 아무것도 쓰지 않고 알린다.
+                if (mode == WriteMode.New)
+                {
+                    var clash = files.Where(f => File.Exists(f.Path)).Select(f => Path.GetFileName(f.Path)).ToList();
+                    if (clash.Count > 0)
+                    {
+                        _main.Status = $"새 파일 모드인데 이미 있는 파일 {clash.Count}개 — 아무것도 쓰지 않았습니다: "
+                            + string.Join(", ", clash.Take(5)) + (clash.Count > 5 ? " …" : "");
+                        return;
+                    }
+                }
                 await Task.Run(() =>
                 {
                     foreach (var f in files)

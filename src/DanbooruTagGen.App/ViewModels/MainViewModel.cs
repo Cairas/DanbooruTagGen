@@ -167,11 +167,17 @@ public sealed partial class MainViewModel : ObservableObject
             var requires = await Task.Run(() => Core.Generation.RequiresRules.LoadFromFileOrDefault(AppPaths.RequiresFile));
             Conflicts = conflicts;
             Requires = requires;
+            // 규칙을 소비하는 쪽은 다음 생성부터 새 규칙을 읽지만, 이미 화면에 떠 있는 경고·배지는 옛 규칙으로
+            // 계산된 채 남는다 — 방금 고친 규칙이 반영됐는지 확인하려면 재시작해야 했다.
+            RecipeBuilder?.RefreshConflicts();
+            RecipeLibrary?.RefreshConflictBadges();
             Status = $"모순 규칙 {conflicts.Count}개를 다시 읽었습니다";
         }
-        catch
+        catch (Exception ex)
         {
             // 파일을 쓰는 중이면 읽기에 실패할 수 있다 — 기존 규칙을 유지하고 다음 변경 이벤트에서 다시 시도한다.
+            // 다만 조용히 넘기면 "고쳤는데 왜 반영이 안 되지"가 되므로 이유는 남긴다.
+            Status = "모순 규칙을 다시 읽지 못해 기존 규칙을 유지합니다(파일을 다시 저장하면 재시도) — " + ex.Message;
         }
     }
 
@@ -356,6 +362,8 @@ public sealed partial class MainViewModel : ObservableObject
             // 화면이 옛 객체를 들고 있으면 창을 닫을 때 그 사본이 되쓰여 갱신이 무효가 된다.
             // (뷰모델은 InitializeAsync 뒤에야 생기므로 null 가드)
             RecipeBuilder?.RefreshPools();
+            RecipeBuilder?.RefreshConflicts();   // 풀 후보가 바뀌었으면 빌더의 모순·다양성 경고도 달라진다
+            PoolLibrary?.Refresh();
             RecipeLibrary?.Refresh();
             Generation?.RefreshBatchRecipes();
 

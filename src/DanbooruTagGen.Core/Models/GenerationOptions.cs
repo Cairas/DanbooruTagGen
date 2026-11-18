@@ -10,7 +10,9 @@ public enum SamplingMode
     Weighted = 1,
 }
 
-public sealed class GenerationOptions
+/// <summary>생성 옵션. 레코드인 이유: 일괄 생성이 레시피마다 줄 수·시드만 바꾼 사본을 만드는데(<c>with</c>),
+/// 필드를 손으로 옮겨 적으면 옵션을 추가할 때 사본 쪽에서 빠뜨리기 쉽다.</summary>
+public sealed record GenerationOptions
 {
     public int LineCount { get; set; } = 100;
     public int? Seed { get; set; }
