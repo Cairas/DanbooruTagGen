@@ -20,17 +20,28 @@ public static class AppPaths
         Path.Combine(DataDir, "ko-nsfw.csv"),
     };
 
+    /// <summary>저장소 루트(있으면). exe는 보통 {repo}/src/DanbooruTagGen.App/bin/{Config}/{TFM}/ 밑에서 돈다.</summary>
+    public static string? RepoRoot { get; } = ResolveRepoRoot();
+
+    /// <summary>개발 모드: 프리셋(data/presets)과 규칙(conflicts.csv·requires.csv)을 exe 옆 사본 대신 저장소의 data/에서 직접 읽고 감시한다 —
+    /// 데이터만 고쳤을 때 빌드 출력 폴더로 복사하지 않아도 바로 반영된다. 설정(devModeReadRepoData)으로 켜며 다음 실행부터 적용된다.
+    /// 기본 꺼짐: 켜면 저장소에 넣은 작성 중인 레시피 JSON이 곧바로 시딩되므로, 검증 뒤에 링크하던 작업 흐름이 바뀐다.</summary>
+    public static bool DevMode { get; } = RepoRoot != null && ReadDevModeSetting();
+
+    /// <summary>프리셋·규칙을 읽는 data 폴더(개발 모드면 저장소, 아니면 exe 옆).</summary>
+    public static string PresetDataDir => DevMode ? Path.Combine(RepoRoot!, "data") : DataDir;
+
     /// <summary>모순 태그 규칙 파일(상호배타 그룹). data/ 동봉.</summary>
-    public static string ConflictsFile { get; } = Path.Combine(DataDir, "conflicts.csv");
+    public static string ConflictsFile => Path.Combine(PresetDataDir, "conflicts.csv");
 
     /// <summary>상대 필요 규칙 파일(requires|태그|any-of|상대…). data/ 동봉 — 없으면 Core 내장본을 쓴다.</summary>
-    public static string RequiresFile { get; } = Path.Combine(DataDir, "requires.csv");
+    public static string RequiresFile => Path.Combine(PresetDataDir, "requires.csv");
 
     /// <summary>프로그램 제공 프리셋(번들 축 풀·컨셉 팩). 앱 시작 시 PresetSeeder가
     /// 사용자 데이터(%APPDATA%)로 한 번만 주입한다 — 깃에는 이 번들만 올라가고
     /// 사용자 커스텀은 올라가지 않는 구조의 경계선.</summary>
-    public static string PresetPoolsFile { get; } = Path.Combine(DataDir, "presets", "pools.json");
-    public static string PresetRecipesDir { get; } = Path.Combine(DataDir, "presets", "recipes");
+    public static string PresetPoolsFile => Path.Combine(PresetDataDir, "presets", "pools.json");
+    public static string PresetRecipesDir => Path.Combine(PresetDataDir, "presets", "recipes");
 
     /// <summary>개발 저장소의 원본 data/presets/recipes 폴더(있으면). exe는 보통
     /// {repo}/src/DanbooruTagGen.App/bin/{Config}/{TFM}/ 밑에서 돌아가므로, 그 자리에서
@@ -43,14 +54,43 @@ public static class AppPaths
 
     private static string? ResolveRepoSourceRecipesDir()
     {
+        if (ResolveRepoRoot() is not { } repoRoot) return null;
+        var candidate = Path.Combine(repoRoot, "data", "presets", "recipes");
+        return Directory.Exists(candidate) ? candidate : null;
+    }
+
+    private static string? ResolveRepoRoot()
+    {
         var exeDir = Path.GetDirectoryName(Environment.ProcessPath);
         if (exeDir is null) return null;
         // net9.0-windows -> Release/Debug -> bin -> DanbooruTagGen.App -> src -> repo root
         var repoRoot = Directory.GetParent(exeDir)?.Parent?.Parent?.Parent?.Parent?.FullName;
-        if (repoRoot is null) return null;
-        var candidate = Path.Combine(repoRoot, "data", "presets", "recipes");
-        return Directory.Exists(candidate) ? candidate : null;
+        return repoRoot != null && Directory.Exists(Path.Combine(repoRoot, "data", "presets", "recipes")) ? repoRoot : null;
     }
+
+    /// <summary>settings.json의 devModeReadRepoData. 경로 상수가 정해지기 전(SettingsStore보다 먼저)에 필요해 JSON을 직접 읽는다.</summary>
+    private static bool ReadDevModeSetting()
+    {
+        try
+        {
+            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DanbooruTagGen", "settings.json");
+            if (!File.Exists(path)) return false;
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
+            return doc.RootElement.TryGetProperty("devModeReadRepoData", out var v) && v.ValueKind == System.Text.Json.JsonValueKind.True;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Text.Json.JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>빌드 시각: 앱·Core 어셈블리 중 늦게 쓰인 쪽. 구빌드로 테스트하는 일을 막으려고 제목 표시줄에 띄운다.</summary>
+    public static DateTime BuildTime { get; } = new[] { "DanbooruTagGen.App.dll", "DanbooruTagGen.Core.dll" }
+        .Select(f => Path.Combine(AppContext.BaseDirectory, f))
+        .Where(File.Exists)
+        .Select(File.GetLastWriteTime)
+        .DefaultIfEmpty(DateTime.MinValue)
+        .Max();
 
     public static string AppDataDir { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
@@ -70,6 +110,19 @@ public static class AppPaths
 
     /// <summary>"여러 레시피 일괄 생성"에서 고른 조합을 이름 붙여 저장한 프리셋들.</summary>
     public static string BatchPresetsFile => Path.Combine(AppDataDir, "batch-presets.json");
+
+    /// <summary>문제 로그 폴더(하루 한 파일, 7일 보관) — Core.Logging.ProblemLog.</summary>
+    public static string LogsDir => Path.Combine(AppDataDir, "logs");
+
+    /// <summary>실제 토크나이저 파일(clip/, qwen3/) — exe 옆 data/tokenizers.</summary>
+    public static string TokenizersDir => Path.Combine(DataDir, "tokenizers");
+
+    /// <summary>사용자 데이터 자동 백업(zip) 폴더 — Core.Persistence.BackupStore.</summary>
+    public static string BackupsDir => Path.Combine(AppDataDir, "backups");
+    /// <summary>레시피별 버전 기록 폴더 — Core.Persistence.RecipeHistoryStore.</summary>
+    public static string HistoryDir => Path.Combine(AppDataDir, "history");
+    /// <summary>생성 기록 폴더 — Core.Persistence.GenerationHistoryStore.</summary>
+    public static string GenerationHistoryDir => Path.Combine(AppDataDir, "generations");
 
     public static void EnsureAppDataDir() => Directory.CreateDirectory(AppDataDir);
 }

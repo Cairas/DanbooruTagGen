@@ -72,6 +72,22 @@ public static class VarietyAnalyzer
     public static long ComputeMajorCombinations(Recipe recipe, IReadOnlyDictionary<string, Pool> poolsById)
         => ComputeMajorCombinations(recipe.Slots, poolsById);
 
+    /// <summary>켜진 슬롯 전부의 가짓수를 곱한 "이론상 서로 다른 줄 수"(MAJOR 축만이 아니라 전부). 모순 규칙에 걸리는
+    /// 조합·줄 내 중복으로 겹치는 조합은 빼지 않으므로 상한이다. 넘치면 <see cref="long.MaxValue"/>.</summary>
+    public static long ComputeAllCombinations(IEnumerable<Slot> slots, IReadOnlyDictionary<string, Pool> poolsById)
+    {
+        long all = 1;
+        foreach (var slot in slots)
+        {
+            if (!slot.IsEnabled) continue;
+            var card = SlotCardinality(slot, poolsById);
+            if (card <= 1) continue;
+            if (all > long.MaxValue / card) return long.MaxValue;
+            all *= card;
+        }
+        return all;
+    }
+
     /// <summary>이항계수 C(n,k). 증분 곱셈 순서(× (n-i), ÷ (i+1))는 매 단계에서 항상 정수로
     /// 나눠떨어지므로 중간에 반올림 오차가 생기지 않는다.</summary>
     private static long Combinations(int n, int k)

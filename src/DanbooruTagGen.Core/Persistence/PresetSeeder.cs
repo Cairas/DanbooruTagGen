@@ -51,6 +51,29 @@ public static class PresetSeeder
         return changed;
     }
 
+    /// <summary>갱신을 실제로 하지 않고 무엇이 바뀔지만 본다(목록·장부의 사본에 Seed+SyncBundled를 돌린다 — 둘 다 목록 칸을 갈아 끼울 뿐
+    /// 항목 객체를 고치지 않으므로 얕은 사본이면 원본이 안 바뀐다). 반환: 레시피 이름 기준 (추가, 교체, 제거)와 풀 변경 수.</summary>
+    public static (IReadOnlyList<string> Added, IReadOnlyList<string> Replaced, IReadOnlyList<string> Removed, int PoolChanges) Preview(
+        IReadOnlyList<Pool> userPools, IReadOnlyList<Pool> bundledPools,
+        IReadOnlyList<Recipe> userRecipes, IReadOnlyList<Recipe> bundledRecipes,
+        IEnumerable<string> seededIds)
+    {
+        var pools = userPools.ToList();
+        var recipes = userRecipes.ToList();
+        var seeded = new HashSet<string>(seededIds, StringComparer.Ordinal);
+        var beforeIds = recipes.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var poolsBefore = pools.ToHashSet(ReferenceEqualityComparer.Instance);
+        Seed(pools, bundledPools, recipes, bundledRecipes, seeded);
+        var changed = new HashSet<string>(StringComparer.Ordinal);
+        SyncBundled(pools, bundledPools, recipes, bundledRecipes, seeded, allowRemoval: true, changedRecipeIds: changed);
+        var afterIds = recipes.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var added = recipes.Where(r => !beforeIds.Contains(r.Id)).Select(r => r.Name).ToList();
+        var removed = userRecipes.Where(r => !afterIds.Contains(r.Id)).Select(r => r.Name).ToList();
+        var replaced = userRecipes.Where(r => changed.Contains(r.Id)).Select(r => r.Name).ToList();
+        int poolChanges = pools.Count(p => !poolsBefore.Contains(p)) + userPools.Count(p => !pools.Contains(p));
+        return (added, replaced, removed, poolChanges);
+    }
+
     /// <summary>번들 프리셋의 최신 내용을 사용자 데이터에 덮어쓴다(사용자가 명시적으로 요청할 때만).
     ///
     /// Seed는 "한 번만 주입"이라 이미 시딩된 항목의 내용 변경(태그 보강·슬롯 추가 등)은 전달되지

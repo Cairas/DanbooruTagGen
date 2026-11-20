@@ -14,6 +14,9 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- 동적 PGO 끔: 켜 두면 실행 후 첫 생성이 계측용 코드로 돌아 3~4배 느리다(상납 200줄 첫 회 1.28초 → 0.56초,
+         이후 회차 0.33초 → 0.37초, 2026-11-20 실측). 생성은 대개 앱을 켜고 몇 번 돌리는 식이라 첫 회가 더 중요하다. -->
+    <TieredPGO>false</TieredPGO>
   </PropertyGroup>
 
   <ItemGroup>
@@ -26,6 +29,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
     <Content Include="..\..\data\presets\recipes\**\*.json" Link="data\presets\recipes\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <!-- 실제 토크나이저(IL = CLIP, Anima = Qwen3) — 출력 줄 길이를 ComfyUI와 같은 수로 센다(Core.Tokenization). -->
+    <Content Include="..\..\data\tokenizers\**\*" Link="data\tokenizers\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>

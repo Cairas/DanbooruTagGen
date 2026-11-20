@@ -14,6 +14,7 @@ public partial class App : Application
         // 레시피가 통째로 날아간다. 무엇 때문에 실패했는지 보여 주고 계속 살려 둔다.
         DispatcherUnhandledException += (_, args) =>
         {
+            Services.AppLog.Exception("처리하지 못한 오류", args.Exception);
             MessageBox.Show($"처리하지 못한 오류가 발생했습니다.\n\n{args.Exception.Message}",
                 "DanbooruTagGen", MessageBoxButton.OK, MessageBoxImage.Warning);
             args.Handled = true;

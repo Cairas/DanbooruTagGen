@@ -75,11 +75,14 @@ public class JsonStoreTests
         JsonStore.SaveAtomic(new Sample("written", 7), path);
 
         var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
-        var unlock = Task.Run(async () =>
+        // 전용 스레드로 푼다 — 스레드 풀(Task.Run)은 CPU를 많이 쓰는 다른 테스트와 병렬로 돌 때 늦게 시작해
+        // 재시도 창(3회 × 80ms)을 넘기곤 했다(테스트만 실패하던 경합).
+        var unlock = new Thread(() =>
         {
-            await Task.Delay(120);   // 재시도 창(3회 × 80ms) 안에서 잠금이 풀린다
+            Thread.Sleep(60);   // 재시도 창 안에서 잠금이 풀린다
             stream.Dispose();
-        });
+        }) { IsBackground = true };
+        unlock.Start();
         try
         {
             var result = JsonStore.LoadOrDefault(path, new Sample("fallback", 0));
@@ -87,9 +90,10 @@ public class JsonStoreTests
         }
         finally
         {
-            await unlock;
+            unlock.Join();
             stream.Dispose();
             File.Delete(path);
         }
+        await Task.CompletedTask;
     }
 }

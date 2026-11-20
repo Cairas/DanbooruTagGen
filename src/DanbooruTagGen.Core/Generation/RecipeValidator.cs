@@ -26,6 +26,12 @@ public enum ValidationRule
     /// 프롬프트에 깨진 문법이 섞인 줄 모르게 된다 — 짝 없는 괄호는 A1111에서 뒤 태그 전체를 강조 그룹으로 삼킨다.
     /// 이모티콘(<c>:(</c>)·문장 속 콜론(<c>(she whispers: please~)</c>)은 지적하지 않는다.</summary>
     MalformedSyntax,
+
+    /// <summary>쓰이지 않는 표식: <c>implies:X</c>인데 X가 사전에도 없고 어떤 모순 규칙도 참조하지 않는다. 출력은 안 되므로 그림엔
+    /// 영향이 없지만, 지운 단계의 남은 표식이거나 규칙 쪽 이름과 어긋난 오탈자다(단계 게이팅이 조용히 꺼져 있을 수 있다).
+    /// 표식 이름 규칙(레시피 id 머리 + 밑줄, 예: <c>n584_L1</c>)을 따르는 것만 해당한다 — 그 밖의 <c>implies:</c>는 진짜 태그의 오탈자일 수 있어
+    /// <see cref="UnknownTag"/>로 낸다.</summary>
+    UnusedMarker,
 }
 
 /// <summary>레시피 하나에서 발견한 지적 사항. <see cref="Subject"/>는 원인이 된 태그.</summary>
@@ -95,10 +101,23 @@ public static class RecipeValidator
 
         if (tagInfo != null)
         {
+            var markerSeen = new HashSet<string>(StringComparer.Ordinal);   // 같은 표식이 여러 슬롯에 있어도 한 번만
             foreach (var (tag, hook) in tags)
-                if (tagInfo.Lookup(tag.Key) is null)
-                    issues.Add(new ValidationIssue(ValidationRule.UnknownTag, tag.Text,
-                        UnknownTagMessage(tag.Text, suggest) + HookNote(hook)));
+                // implies:로만 쓰는 단계 표식(예: implies:n592_w1)은 모순 규칙이 참조하는 내부 표식이라 사전에 없는 게 정상이다
+                // (출력도 안 된다). 규칙에 없는 implies:는 그대로 검사한다 — 진짜 태그를 implies:로 쓰다 낸 오탈자는 잡아야 한다.
+            {
+                if (tagInfo.Lookup(tag.Key) is not null) continue;
+                if (tag.IsImplied && conflicts?.IsMember(tag.Key) == true) continue;
+                if (tag.IsImplied && MarkerName.IsMatch(tag.Key))
+                {
+                    if (markerSeen.Add(tag.Key))
+                        issues.Add(new ValidationIssue(ValidationRule.UnusedMarker, tag.Text,
+                            $"'implies:{tag.Text}'는 사전에도 없고 어떤 모순 규칙도 참조하지 않습니다 — 지운 단계의 남은 표식이거나 규칙 쪽 이름과 어긋난 오탈자입니다." + HookNote(hook)));
+                    continue;
+                }
+                issues.Add(new ValidationIssue(ValidationRule.UnknownTag, tag.Text,
+                    UnknownTagMessage(tag.Text, suggest) + HookNote(hook)));
+            }
         }
 
         // 상대 필요 규칙(data/requires.csv). 레시피 전체 기준: 어느 슬롯에서든 상대가 나오면 통과.
@@ -135,6 +154,28 @@ public static class RecipeValidator
 
         return issues;
     }
+
+    /// <summary>후보 문자열 하나를 바로 점검한다(편집 화면의 태그 칩을 입력 즉시 빨갛게 표시하는 용도). 문제 없으면 null.
+    /// 전체 검증(<see cref="Validate"/>)과 같은 기준: 괄호·가중치 문법, 가중치 범위, 추첨 가중치 접두, 사전에 없는 태그
+    /// (자연어 서술과 모순 규칙이 쓰는 implies: 표식·표식 이름 규칙을 따르는 implies:는 문제로 보지 않는다).</summary>
+    public static string? QuickCheck(string raw, ITagLookup? tagInfo, ConflictRules? conflicts = null)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (TagKey.FindSyntaxError(raw) is { } syntax) return "문법 오류: " + syntax;
+        if (WeightRange.FindError(raw) is { } range) return "가중치 범위 오류: " + range;
+        if (TagKey.ParsePickWeight(raw).Error is { } pick) return "추첨 가중치 오류: " + pick;
+        if (tagInfo is null) return null;
+        var unknown = TagKey.Split(raw)
+            .Where(f => f.Text.Length > 0 && !(f.IsPhrase && !f.IsImplied))
+            .Where(f => tagInfo.Lookup(f.Key) is null)
+            .Where(f => !(f.IsImplied && (conflicts?.IsMember(f.Key) == true || MarkerName.IsMatch(f.Key))))
+            .Select(f => f.Text)
+            .ToList();
+        return unknown.Count == 0 ? null : "danbooru 사전에 없는 태그: " + string.Join(", ", unknown);
+    }
+
+    /// <summary>단계 게이팅 표식 이름: 레시피 id 머리(n584·s021 등) + 밑줄 + 이름. danbooru 태그는 이렇게 생기지 않는다.</summary>
+    private static readonly Regex MarkerName = new(@"^[a-z]{1,3}\d+_\w+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static string HookNote(string? hook) => hook is null ? "" : $" (훅 '{hook}')";
 

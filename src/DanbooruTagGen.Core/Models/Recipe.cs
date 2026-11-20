@@ -34,4 +34,9 @@ public sealed class Recipe
     /// 저장하지 않는 계산값.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string OriginBadge { get; set; } = "";
+
+    /// <summary>프리셋 갱신으로 새로 들어왔으면 "🆕", 내용이 바뀌었으면 "✏️"(아직 안 열어 봤을 때만).
+    /// 표시 기록은 사용자 설정(RecipeChangeMarks)에 있고, 이건 목록용 계산값이다.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string ChangeBadge { get; set; } = "";
 }

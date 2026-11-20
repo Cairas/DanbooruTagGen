@@ -9,6 +9,7 @@ public static class SettingsStore
 
     public static void Save(Settings settings)
     {
+        if (AppWriteGuard.Frozen) return;   // 백업 복원 후 재시작 중
         AppPaths.EnsureAppDataDir();
         JsonStore.SaveAtomic(settings, AppPaths.SettingsFile);
     }

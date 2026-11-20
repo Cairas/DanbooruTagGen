@@ -120,6 +120,27 @@ public sealed record SlotSpec(IReadOnlyList<string> Tags, int MaxCount, bool IsF
 
 public enum ConflictSeverity { Definite, Possible }
 
+/// <summary>conflicts.csv에서 규칙 줄을 라벨로 찾는다(편집 화면의 "규칙 보기" — 어떤 줄 때문에 모순으로 잡혔는지).</summary>
+public static class ConflictRuleSource
+{
+    /// <summary>라벨 칸(첫 '|' 앞, 앞뒤 공백 무시)이 <paramref name="labels"/> 중 하나와 같은 줄들(1부터 센 줄 번호와 원문).</summary>
+    public static IReadOnlyList<(int Line, string Text)> FindLines(string csvPath, IEnumerable<string> labels)
+    {
+        var wanted = labels.Select(l => l.Trim()).ToHashSet(StringComparer.Ordinal);
+        var result = new List<(int, string)>();
+        if (!File.Exists(csvPath) || wanted.Count == 0) return result;
+        int n = 0;
+        foreach (var line in File.ReadLines(csvPath))
+        {
+            n++;
+            int bar = line.IndexOf('|');
+            if (bar <= 0) continue;
+            if (wanted.Contains(line[..bar].Trim())) result.Add((n, line));
+        }
+        return result;
+    }
+}
+
 /// <summary>레시피 사전 점검 결과(항상 충돌=Definite, 가끔 가능=Possible).</summary>
 public sealed record RecipeConflict(string Label, IReadOnlyList<string> Tags, ConflictSeverity Severity);
 
@@ -144,12 +165,23 @@ public sealed class ConflictRules
     /// 전부 빠져나갔다). 결과(ConflictHit/RecipeConflict)의 태그 이름은 conflicts.csv 원문을 쓴다.</summary>
     private readonly IReadOnlyList<KeyedGroup> _keyed;
 
-    /// <summary>멤버 키 → 그 키를 멤버로 가진 규칙들. 슬롯 단위 로컬 필터(<see cref="Introduces"/>)가
-    /// 후보 하나마다 전 규칙을 훑지 않도록 — 후보가 건드리는 규칙만 본다.</summary>
-    private readonly Dictionary<string, List<KeyedGroup>> _byMemberKey = new(StringComparer.Ordinal);
+    /// <summary>멤버 키 → 그 키를 멤버로 가진 규칙들(그 규칙 안에서의 편·비용과 함께). 슬롯 단위 로컬 필터
+    /// (<see cref="LineTracker"/>)가 후보 하나마다 전 규칙을 훑지 않도록 — 후보가 건드리는 규칙만 본다.</summary>
+    private readonly Dictionary<string, List<MemberRef>> _byMemberKey = new(StringComparer.Ordinal);
+
+    /// <summary>면제 키 → 그 키로 면제되는 규칙들. <see cref="LineTracker"/>가 줄에 면제 태그가 들어오는 순간
+    /// 해당 규칙의 억제 상태를 갱신하는 데 쓴다.</summary>
+    private readonly Dictionary<string, List<KeyedGroup>> _byExceptKey = new(StringComparer.Ordinal);
 
     /// <summary>멤버 하나. Side: 편 번호(상호배타는 멤버마다 고유), Cost: 예산 비용(그 외 1).</summary>
     private readonly record struct Member(string Name, string Key, int Side, int Cost);
+
+    /// <summary>역인덱스 항목: 어느 규칙의 멤버인지 + 그 규칙 안에서의 편·비용.</summary>
+    private readonly record struct MemberRef(KeyedGroup Rule, string Key, int Side, int Cost);
+
+    /// <summary>다인수 마커의 판정 키 비교용(서수). 판정 키는 이미 소문자라 <see cref="KeyView.AnyMultiPerson"/>
+    /// (줄 집합의 서수 비교)과 같은 결과를 낸다.</summary>
+    private static readonly HashSet<string> MultiPersonKeys = new(MultiPersonMarkers, StringComparer.Ordinal);
 
     /// <summary>판정에 쓰는 키 집합 보기 — 집합 두 개(지금까지 확정된 줄 + 후보)를 합치지 않고 본다.
     /// 후보 하나마다 합집합을 새로 만들면 줄 수 × 슬롯 × 후보만큼 할당이 생긴다.</summary>
@@ -219,11 +251,18 @@ public sealed class ConflictRules
         _groups = groups.ToList();
         _keyed = _groups.Select((g, i) => BuildKeyed(g, i)).ToList();
         foreach (var g in _keyed)
+        {
             foreach (var m in g.Members)
             {
-                if (!_byMemberKey.TryGetValue(m.Key, out var list)) _byMemberKey[m.Key] = list = new List<KeyedGroup>();
+                if (!_byMemberKey.TryGetValue(m.Key, out var list)) _byMemberKey[m.Key] = list = new List<MemberRef>();
+                list.Add(new MemberRef(g, m.Key, m.Side, m.Cost));
+            }
+            foreach (var e in g.ExceptKeys.Distinct(StringComparer.Ordinal))
+            {
+                if (!_byExceptKey.TryGetValue(e, out var list)) _byExceptKey[e] = list = new List<KeyedGroup>();
                 list.Add(g);
             }
+        }
     }
 
     /// <summary>멤버도 같은 키로 — "(table:1.2)"로 쓴 멤버는 table로 본다. 키가 같은 멤버가 둘이면(예: table과
@@ -287,11 +326,11 @@ public sealed class ConflictRules
         HashSet<int>? seen = null;
         foreach (var key in keys)
         {
-            if (!_byMemberKey.TryGetValue(key, out var groups)) continue;
-            foreach (var g in groups)
+            if (!_byMemberKey.TryGetValue(key, out var refs)) continue;
+            foreach (var r in refs)
             {
                 seen ??= new HashSet<int>();
-                if (seen.Add(g.Index)) result.Add(g);
+                if (seen.Add(r.Rule.Index)) result.Add(r.Rule);
             }
         }
         if (result.Count > 1) result.Sort((a, b) => a.Index.CompareTo(b.Index));
@@ -440,9 +479,9 @@ public sealed class ConflictRules
         var keys = new KeyView(set);
         foreach (var key in set)
         {
-            if (!_byMemberKey.TryGetValue(key, out var groups)) continue;
-            foreach (var g in groups)
-                if (!g.IsSuppressed(keys) && g.Violated(keys)) return true;
+            if (!_byMemberKey.TryGetValue(key, out var refs)) continue;
+            foreach (var r in refs)
+                if (!r.Rule.IsSuppressed(keys) && r.Rule.Violated(keys)) return true;
         }
         return false;
     }
@@ -455,7 +494,9 @@ public sealed class ConflictRules
     /// 때문에 그 규칙을 건드리는 후보가 전부 걸러지면 다양성만 잃고 얻는 게 없다.</item>
     /// <item>억제는 합친 집합 기준(후보 자신이 면제 태그를 가져오면 통과). 뒤쪽 슬롯이 나중에 가져올
     /// 면제 태그는 모른다 — 앞에서부터 확정하는 방식의 한계라, 그 경우는 조금 엄격하게 걸러진다.</item>
-    /// </list></summary>
+    /// </list>
+    /// <para>판정의 기준 구현이다. 생성기는 같은 판정을 증분으로 하는 <see cref="LineTracker"/>를 쓴다(결과 동일,
+    /// 테스트가 둘을 대조한다).</para></summary>
     internal bool Introduces(HashSet<string> current, HashSet<string> added)
     {
         HashSet<KeyedGroup>? checkedGroups = null;
@@ -463,9 +504,10 @@ public sealed class ConflictRules
         var before = new KeyView(current);
         foreach (var key in added)
         {
-            if (!_byMemberKey.TryGetValue(key, out var groups)) continue;
-            foreach (var g in groups)
+            if (!_byMemberKey.TryGetValue(key, out var refs)) continue;
+            foreach (var r in refs)
             {
+                var g = r.Rule;
                 // 한 키의 목록 안에는 같은 규칙이 두 번 없다(멤버는 키로 중복 제거) — 후보 키가 여럿일 때만
                 // 같은 규칙을 두 번 볼 수 있다.
                 if (added.Count > 1)
@@ -479,6 +521,182 @@ public sealed class ConflictRules
             }
         }
         return false;
+    }
+
+    /// <summary>후보(풀 후보 문자열 하나 또는 ALT 그룹 하나)가 건드리는 규칙들을 미리 정리해 둔 것.
+    /// <see cref="LineTracker.Introduces"/>가 줄마다 쓴다 — 후보는 Generate 동안 안 바뀌므로 한 번만 만든다.</summary>
+    internal sealed class Candidate
+    {
+        /// <summary>후보 키 중 멤버인 것들을 규칙별로 모은 것(규칙 중복 없음). Rule은 규칙 위치(<see cref="_keyed"/>),
+        /// Members는 그 규칙에서 후보가 가진 멤버의 (키, 편, 비용), ExceptInCandidate는 후보가 그 규칙의 면제 키를 가졌는가.</summary>
+        internal readonly (int Rule, (string Key, int Side, int Cost)[] Members, bool ExceptInCandidate)[] Touches;
+        internal readonly bool HasMultiPersonMarker;
+
+        internal Candidate(ConflictRules rules, HashSet<string> keys)
+        {
+            var byRule = new Dictionary<int, List<(string, int, int)>>();
+            foreach (var key in keys)
+            {
+                if (!rules._byMemberKey.TryGetValue(key, out var refs)) continue;
+                foreach (var r in refs)
+                {
+                    if (!byRule.TryGetValue(r.Rule.Index, out var members))
+                        byRule[r.Rule.Index] = members = new List<(string, int, int)>();
+                    members.Add((r.Key, r.Side, r.Cost));
+                }
+            }
+            Touches = byRule
+                .Select(e => (e.Key, e.Value.ToArray(), rules._keyed[e.Key].ExceptKeys.Any(keys.Contains)))
+                .ToArray();
+            HasMultiPersonMarker = keys.Overlaps(MultiPersonKeys);
+        }
+    }
+
+    internal Candidate Prepare(HashSet<string> candidateKeys) => new(this, candidateKeys);
+
+    internal LineTracker NewLineTracker() => new(this);
+
+    /// <summary><see cref="Introduces"/>의 증분판: 줄에 확정된 키들이 각 규칙을 어디까지 채웠는지(편·예산 합·면제)를
+    /// 키가 들어올 때마다 갱신해 두고, 후보 판정은 그 상태에 후보의 멤버만 얹어 본다.
+    /// <para>왜: 로컬 필터는 줄마다 ALT 그룹·풀 후보 수백 개를 판정한다. 예전 판정은 후보가 건드리는 규칙마다 멤버
+    /// 전체를 줄 집합과 대조해서, 단계 표식(implies:)처럼 큰 규칙 여럿에 걸친 키가 있는 레시피는 줄 하나에 멤버
+    /// 대조가 15만 번을 넘었다(상납 · 구도형: 200줄 1.3초, 2026-11-20 실측). 증분 상태로는 규칙 하나 판정이
+    /// "후보 안의 그 규칙 멤버 수"(보통 1)에 비례한다.</para>
+    /// <para>풀 슬롯은 한 슬롯에서 여러 개를 뽑는 동안 "줄 + 이 슬롯에서 이미 뽑은 것" 기준으로 판정하고 끝나면
+    /// 줄 기준으로 되돌린다 — <see cref="Mark"/>/<see cref="Rollback"/>.</para>
+    /// <para>Generate 호출 하나(=스레드 하나) 안에서만 쓴다. 공유하지 말 것.</para></summary>
+    internal sealed class LineTracker
+    {
+        private struct RuleState
+        {
+            public int Stamp;        // 이 값이 _stamp와 다르면 이번 줄에선 아직 손대지 않은 규칙(=빈 상태)
+            public int FirstSide;    // 줄에 처음 나온 멤버의 편(-1: 없음)
+            public bool MultiSide;   // 서로 다른 편이 둘 이상 나왔다(상호배타·편 나눔의 위반)
+            public long Sum;         // 예산 규칙: 나온 멤버 비용 합
+            public bool ExceptHit;   // 면제 키가 줄에 있다
+        }
+
+        private readonly ConflictRules _rules;
+        private readonly RuleState[] _state;
+        private readonly HashSet<string> _keys = new(StringComparer.Ordinal);
+        private readonly List<string> _keyLog = new();
+        private readonly List<(int Index, RuleState Old)> _ruleLog = new();
+        private int _stamp = 1;
+        private int _markers;
+
+        internal LineTracker(ConflictRules rules)
+        {
+            _rules = rules;
+            _state = new RuleState[rules._keyed.Count];
+        }
+
+        /// <summary>새 줄(재추첨 포함)을 시작한다.</summary>
+        public void BeginLine()
+        {
+            if (_stamp == int.MaxValue) { Array.Clear(_state); _stamp = 0; }
+            _stamp++;
+            _keys.Clear();
+            _keyLog.Clear();
+            _ruleLog.Clear();
+            _markers = 0;
+        }
+
+        private RuleState Get(int i) =>
+            _state[i].Stamp == _stamp ? _state[i] : new RuleState { Stamp = _stamp, FirstSide = -1 };
+
+        private void Set(int i, RuleState s)
+        {
+            _ruleLog.Add((i, _state[i]));
+            _state[i] = s;
+        }
+
+        /// <summary>줄에 판정 키 하나를 확정한다(이미 있으면 아무 일도 안 한다).</summary>
+        public void Add(string key)
+        {
+            if (!_keys.Add(key)) return;
+            _keyLog.Add(key);
+            if (MultiPersonKeys.Contains(key)) _markers++;
+
+            if (_rules._byMemberKey.TryGetValue(key, out var refs))
+                foreach (var r in refs)
+                {
+                    int i = r.Rule.Index;
+                    var s = Get(i);
+                    if (r.Rule.Kind == ConflictKind.Budget) s.Sum += r.Cost;
+                    else if (s.FirstSide < 0) s.FirstSide = r.Side;
+                    else if (r.Side != s.FirstSide) s.MultiSide = true;
+                    Set(i, s);
+                }
+
+            if (_rules._byExceptKey.TryGetValue(key, out var exempted))
+                foreach (var g in exempted)
+                {
+                    var s = Get(g.Index);
+                    s.ExceptHit = true;
+                    Set(g.Index, s);
+                }
+        }
+
+        public void AddRange(IEnumerable<string> keys)
+        {
+            foreach (var k in keys) Add(k);
+        }
+
+        public (int Keys, int Rules) Mark() => (_keyLog.Count, _ruleLog.Count);
+
+        /// <summary><see cref="Mark"/> 이후에 더한 키를 전부 되돌린다.</summary>
+        public void Rollback((int Keys, int Rules) mark)
+        {
+            for (int n = _ruleLog.Count - 1; n >= mark.Rules; n--)
+                _state[_ruleLog[n].Index] = _ruleLog[n].Old;
+            _ruleLog.RemoveRange(mark.Rules, _ruleLog.Count - mark.Rules);
+
+            for (int n = _keyLog.Count - 1; n >= mark.Keys; n--)
+            {
+                _keys.Remove(_keyLog[n]);
+                if (MultiPersonKeys.Contains(_keyLog[n])) _markers--;
+            }
+            _keyLog.RemoveRange(mark.Keys, _keyLog.Count - mark.Keys);
+        }
+
+        /// <summary>지금 줄에 후보를 더하면 <b>새로</b> 깨지는 규칙이 있는가 — <see cref="Introduces"/>와 같은 판정.</summary>
+        public bool Introduces(Candidate c)
+        {
+            foreach (var (rule, members, exceptInCandidate) in c.Touches)
+            {
+                var g = _rules._keyed[rule];
+                var s = Get(rule);
+                bool character = g.Group.Scope == ConflictScope.Character;
+                bool suppressedBefore = (character && _markers > 0) || s.ExceptHit;
+                // 합친 집합에서 억제되면 새 충돌이 아니다(후보가 면제 태그·다인수 마커를 가져오는 경우 포함).
+                if (suppressedBefore || exceptInCandidate || (character && c.HasMultiPersonMarker)) continue;
+
+                bool violatedAfter, violatedBefore;
+                if (g.Kind == ConflictKind.Budget)
+                {
+                    long sum = s.Sum;
+                    foreach (var m in members) if (!_keys.Contains(m.Key)) sum += m.Cost;   // 이미 줄에 있는 멤버는 한 번만
+                    violatedAfter = sum > g.Limit;
+                    violatedBefore = s.Sum > g.Limit;
+                }
+                else
+                {
+                    int first = s.FirstSide;
+                    bool multi = s.MultiSide;
+                    foreach (var m in members)
+                    {
+                        if (first < 0) first = m.Side;
+                        else if (m.Side != first) multi = true;
+                    }
+                    violatedAfter = multi;
+                    violatedBefore = s.MultiSide;
+                }
+
+                // 원래(억제 안 된 채) 깨져 있던 규칙은 "새 충돌"이 아니다.
+                if (violatedAfter && !violatedBefore) return true;
+            }
+            return false;
+        }
     }
 
     /// <summary>레시피 사전 점검. always는 항상 함께 나오는 태그(모든 고정 슬롯),

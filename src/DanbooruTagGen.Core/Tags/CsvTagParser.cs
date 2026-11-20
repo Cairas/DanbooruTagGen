@@ -37,6 +37,8 @@ public static class CsvTagParser
     /// <summary>RFC4180 식 한 줄 분리. 따옴표 안의 콤마는 보존, "" 는 리터럴 따옴표.</summary>
     public static IReadOnlyList<string> SplitCsvFields(string line)
     {
+        // 따옴표가 없는 줄(danbooru.csv 대부분)은 그냥 콤마로 나눈 것과 결과가 같다 — 글자마다 StringBuilder에 붙이지 않는다.
+        if (line.IndexOf('"') < 0) return line.Split(',');
         var fields = new List<string>();
         var sb = new StringBuilder();
         bool inQuotes = false;

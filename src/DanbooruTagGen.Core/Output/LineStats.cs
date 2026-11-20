@@ -18,6 +18,14 @@ public sealed record LineLengthStats(int LineCount, int Min, int Max, double Ave
     /// <summary>75토큰 청크 수의 최대, 그리고 청크가 2개 이상 필요한 줄 수.</summary>
     public int ChunksMax { get; init; }
     public int MultiChunkLines { get; init; }
+
+    /// <summary>실제 토크나이저로 잰 경우(counter를 받는 LineStats.Measure): 어느 모델 기준인지, 길이 기준(토큰), 기준을 넘은 줄 수,
+    /// 가장 긴 줄의 번호(입력 목록 기준), 정확한 수인가(토크나이저 파일이 없으면 어림값). 어림 경로(예전 Measure)에선 TokenLimit이 0이다.</summary>
+    public Tokenization.ModelKind Model { get; init; }
+    public int TokenLimit { get; init; }
+    public int OverLimit { get; init; }
+    public int LongestLineIndex { get; init; } = -1;
+    public bool IsExact { get; init; }
 }
 
 /// <summary>줄 길이(태그 개수) + 토큰 예산 점검.
@@ -46,14 +54,25 @@ public static class LineStats
 
     private static readonly Regex WordRun = new(@"[\p{L}\p{N}]+", RegexOptions.Compiled);
 
-    public static LineLengthStats Measure(IReadOnlyList<string> lines, int budget = DefaultBudget, ITagLookup? lookup = null)
+    public static LineLengthStats Measure(IReadOnlyList<string> lines, int budget = DefaultBudget, ITagLookup? lookup = null) =>
+        Measure(lines, budget, lookup, EstimateClipTokens, tokenLimit: 0) with { IsExact = false };
+
+    /// <summary>실제 토크나이저로 잰다(ComfyUI처럼 가중치 괄호를 풀어 조각마다 세어 더함 — TokenCounters.CountLine).
+    /// tokenLimit을 넘는 줄 수와 가장 긴 줄을 함께 낸다. 청크 수는 CLIP(75토큰) 기준.</summary>
+    public static LineLengthStats Measure(IReadOnlyList<string> lines, Tokenization.ITokenCounter counter, int tokenLimit, ITagLookup? lookup = null) =>
+        Measure(lines, DefaultBudget, lookup, line => Tokenization.TokenCounters.CountLine(counter, line), tokenLimit)
+            with { Model = counter.Model, IsExact = counter.IsExact };
+
+    private static LineLengthStats Measure(IReadOnlyList<string> lines, int budget, ITagLookup? lookup, Func<string, int> countTokens, int tokenLimit)
     {
-        int count = 0, min = int.MaxValue, max = 0, over = 0;
+        int count = 0, min = int.MaxValue, max = 0, over = 0, overLimit = 0, longest = -1;
+        int index = -1;
         long total = 0, phraseTotal = 0, tokenTotal = 0;
         int phraseMax = 0, tokenMax = 0, chunkMax = 0, multiChunk = 0;
 
         foreach (var line in lines)
         {
+            index++;
             if (string.IsNullOrWhiteSpace(line)) continue;   // 파일 구분용 빈 줄은 세지 않는다
             var items = Items(line);
             int tags = items.Count;
@@ -69,15 +88,16 @@ public static class LineStats
             phraseTotal += phraseWords;
             if (phraseWords > phraseMax) phraseMax = phraseWords;
 
-            int tokens = EstimateClipTokens(line);
+            int tokens = countTokens(line);
             tokenTotal += tokens;
-            if (tokens > tokenMax) tokenMax = tokens;
+            if (tokens > tokenMax || longest < 0) { tokenMax = Math.Max(tokenMax, tokens); longest = index; }
+            if (tokenLimit > 0 && tokens > tokenLimit) overLimit++;
             int chunks = ChunksOf(tokens);
             if (chunks > chunkMax) chunkMax = chunks;
             if (chunks > 1) multiChunk++;
         }
 
-        if (count == 0) return new LineLengthStats(0, 0, 0, 0, 0, budget);
+        if (count == 0) return new LineLengthStats(0, 0, 0, 0, 0, budget) { TokenLimit = tokenLimit };
         return new LineLengthStats(count, min, max, Math.Round((double)total / count, 1), over, budget)
         {
             PhraseWordsAverage = Math.Round((double)phraseTotal / count, 1),
@@ -86,6 +106,9 @@ public static class LineStats
             TokensMax = tokenMax,
             ChunksMax = chunkMax,
             MultiChunkLines = multiChunk,
+            TokenLimit = tokenLimit,
+            OverLimit = overLimit,
+            LongestLineIndex = longest,
         };
     }
 

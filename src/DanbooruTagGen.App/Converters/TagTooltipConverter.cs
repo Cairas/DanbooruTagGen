@@ -19,6 +19,8 @@ public sealed class TagTooltipConverter : IMultiValueConverter
         var tag = lookup?.Lookup(name);
 
         var sb = new StringBuilder(name.Replace('_', ' '));
+        if (RecipeValidator.QuickCheck(name, lookup, TagProblemBrushConverter.CurrentRules()) is { } problem)
+            sb.Append('\n').Append("⚠ ").Append(problem);
         if (tag is null) return sb.ToString();
 
         if (!string.IsNullOrWhiteSpace(tag.Description)) sb.Append('\n').Append(tag.Description);

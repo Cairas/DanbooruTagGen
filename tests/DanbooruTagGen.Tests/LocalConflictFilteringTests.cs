@@ -118,4 +118,53 @@ public class LocalConflictFilteringTests
         Assert.False(rules.Introduces(line, new HashSet<string> { "night" }));   // 원래 깨져 있던 규칙은 "새 충돌"이 아니다
         Assert.False(rules.Introduces(line, new HashSet<string> { "smile" }));
     }
+
+    [Fact]
+    public void LineTrackerMatchesIntroducesIncludingRollback()
+    {
+        // 생성기가 쓰는 증분 판정(LineTracker)이 기준 구현(Introduces)과 매번 같은 답을 내는지 — 상호배타·편 나눔·예산,
+        // 면제, 캐릭터 단위(다인수 마커로 억제), 키를 공유하는 규칙, 줄에 이미 있는 키를 다시 가져오는 후보,
+        // 풀 슬롯의 Mark/Rollback까지 무작위로 섞는다.
+        var rules = new ConflictRules(new[]
+        {
+            new ConflictGroup("A", new[] { "a1", "a2", "a3" }),
+            new ConflictGroup("B", new[] { "b1", "b2", "a1" }, ConflictScope.Character),
+            new ConflictGroup("C", new[] { "a2", "c1" }, Except: new[] { "x", "y" }),
+            ConflictGroup.Bipartite("D", new IReadOnlyList<string>[] { new[] { "d1", "d2" }, new[] { "d3", "a3" } }),
+            ConflictGroup.WithBudget("E", "hands", 2, new[] { ("e1", 2), ("e2", 1), ("a2", 1), ("b1", 0) }),
+            ConflictGroup.WithBudget("F", "zero", 0, new[] { ("f1", 1), ("c1", 0) }, except: new[] { "y" }),
+        });
+        var vocab = new[] { "a1", "a2", "a3", "b1", "b2", "c1", "d1", "d2", "d3", "e1", "e2", "f1", "x", "y", "2girls", "smile" };
+        var tracker = rules.NewLineTracker();
+        var rnd = new Random(7);
+
+        for (int line = 0; line < 2000; line++)
+        {
+            tracker.BeginLine();
+            var current = new HashSet<string>();
+            var marks = new Stack<((int, int) Mark, HashSet<string> Snapshot)>();
+
+            for (int step = 0; step < 12; step++)
+            {
+                var candidate = vocab.Where(_ => rnd.Next(6) == 0).ToHashSet();
+                Assert.Equal(rules.Introduces(current, candidate), tracker.Introduces(rules.Prepare(candidate)));
+
+                switch (rnd.Next(4))
+                {
+                    case 0:   // 풀 슬롯 시작: 표시해 두고 이후 키를 되돌릴 수 있게
+                        marks.Push((tracker.Mark(), new HashSet<string>(current)));
+                        break;
+                    case 1 when marks.Count > 0:   // 풀 슬롯 끝: 되돌림
+                        var (mark, snapshot) = marks.Pop();
+                        tracker.Rollback(mark);
+                        current = snapshot;
+                        break;
+                    default:   // 후보를 줄에 확정
+                        tracker.AddRange(candidate);
+                        current.UnionWith(candidate);
+                        break;
+                }
+            }
+        }
+    }
 }

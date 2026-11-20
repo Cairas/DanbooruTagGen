@@ -1,111 +1,159 @@
-<UserControl x:Class="DanbooruTagGen.App.Views.GenerationView"
+﻿<UserControl x:Class="DanbooruTagGen.App.Views.GenerationView"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-    <DockPanel Margin="8">
-        <TextBlock DockPanel.Dock="Top" Text="생성" FontWeight="Bold"/>
-        <Grid DockPanel.Dock="Top" Margin="0,4">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-            <Grid.RowDefinitions>
-                <!-- 11줄: 줄 수·시드·옵션 6개·훅 요약·출력·파일 -->
-                <RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/>
-            </Grid.RowDefinitions>
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="줄 수" VerticalAlignment="Center"/>
-            <TextBox  Grid.Row="0" Grid.Column="1" Text="{Binding LineCount}"/>
-            <TextBlock Grid.Row="1" Grid.Column="0" Text="시드" VerticalAlignment="Center"/>
-            <TextBox  Grid.Row="1" Grid.Column="1" Text="{Binding SeedText}" ToolTip="-1 또는 빈 칸 = 매번 랜덤. 숫자를 넣으면 그 시드로 고정(재현 가능)."/>
-            <CheckBox Grid.Row="2" Grid.Column="1" Content="줄 내 중복 제거" IsChecked="{Binding DedupeWithinLine}"/>
-            <CheckBox Grid.Row="3" Grid.Column="1" Content="줄 중복 회피" IsChecked="{Binding AvoidDuplicateLines}"/>
-            <StackPanel Grid.Row="4" Grid.Column="1">
-                <CheckBox IsChecked="{Binding AvoidConflicts}"
-                          Content="모순 태그 회피 (예: long_hair + short_hair)"
-                          ToolTip="data/conflicts.csv의 상호배타 그룹이 한 줄에 같이 들어가면 재추첨"/>
-                <!-- 줄 전체 재추첨은 무관한 ALT 브랜치까지 억제한다 — 앞쪽 슬롯과 충돌할 후보를 그 자리에서 빼고 뽑는다. -->
-                <CheckBox IsChecked="{Binding LocalConflictFiltering}" Margin="16,0,0,0"
-                          IsEnabled="{Binding AvoidConflicts}"
-                          Content="슬롯 단위로 먼저 걸러내기 (앞쪽 슬롯 우선)"
-                          ToolTip="슬롯을 순서대로 뽑으면서, 앞에서 이미 확정된 태그와 충돌할 후보만 빼고 뽑습니다. 다 걸러지면 기존 줄 재추첨으로 폴백. 켜면 같은 시드라도 결과가 달라집니다."/>
+    <!-- 생성 카드(두 탭 공통). 매번 만지는 것만 위에: 대상 · 줄 수 · 파일 · 쓰기 방식 · 프로필 · 버튼 · 결과 요약 · 미리보기.
+         나머지 설정은 아래 '고급 설정'(접힘). 결과 목록·줄 출처·📌 잠금은 [결과 크게 보기] 창에. -->
+    <DockPanel Margin="8,6,8,8">
+        <TextBlock DockPanel.Dock="Top" Text="생성" FontWeight="Bold" FontSize="14" Margin="0,0,0,4"/>
+        <Border DockPanel.Dock="Top" Background="#EEF4FF" BorderBrush="#B6CCF5" BorderThickness="1" CornerRadius="3" Padding="6,3" Margin="0,0,0,6">
+            <TextBlock Text="{Binding TargetText}" TextWrapping="Wrap"/>
+        </Border>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding HookSummaryText}" FontSize="11" Foreground="#6A1B9A" Margin="0,0,0,4" TextWrapping="Wrap"
+                   Visibility="{Binding HookSummaryText, Converter={StaticResource NonEmptyToVis}}"/>
+
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="72"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+            <Grid.RowDefinitions><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/><RowDefinition/></Grid.RowDefinitions>
+            <TextBlock Grid.Row="0" Text="줄 수" VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <TextBox Width="70" Text="{Binding LineCount}"/>
+                <TextBlock Text="  기본값 — 레시피별은 왼쪽 목록에서" FontSize="11" Foreground="#777" VerticalAlignment="Center"
+                           Visibility="{Binding IsMultiRecipeMode, Converter={StaticResource BoolToVis}}"/>
             </StackPanel>
-            <CheckBox Grid.Row="5" Grid.Column="1" Content="_→공백 (long_hair → long hair)" IsChecked="{Binding UnderscoreToSpace}"/>
-            <CheckBox Grid.Row="6" Grid.Column="1" IsChecked="{Binding WeightedSampling}"
-                      Content="빈도 가중 추첨 (인기 태그 우대)"
-                      ToolTip="danbooru 빈도의 제곱근에 비례해 추첨. 끄면 후보를 동등 확률로 뽑는다."/>
-            <CheckBox Grid.Row="7" Grid.Column="1" IsChecked="{Binding AutoOrderTags}"
-                      Content="태그 순서 자동 배치 (표준 프롬프트 순서)"
-                      ToolTip="한 줄을 품질→인원→외형→의상→행위→소품→배경→형식 순으로 정렬. 미분류 태그는 원래 위치 유지."/>
-            <!-- 훅은 별도 창에 있어 켜 둔 걸 잊기 쉽다 — 생성 직전에 항상 보이도록 여기 둔다. -->
-            <TextBlock Grid.Row="8" Grid.Column="1" Text="{Binding HookSummaryText}"
-                       VerticalAlignment="Center" FontSize="11" Foreground="#37474F"
-                       ToolTip="상단 '🔗 생성 훅' 버튼에서 설정합니다."/>
-            <TextBlock Grid.Row="9" Grid.Column="0" Text="출력" VerticalAlignment="Center"/>
-            <StackPanel Grid.Row="9" Grid.Column="1" Orientation="Horizontal">
-                <ComboBox ItemsSource="{Binding Modes}" SelectedItem="{Binding Mode}" Width="110"/>
-                <CheckBox Content="빈 줄 띄움" IsChecked="{Binding InsertBlankLine}" Margin="8,0,0,0" VerticalAlignment="Center"/>
-            </StackPanel>
-            <TextBlock Grid.Row="10" Grid.Column="0" Text="파일" VerticalAlignment="Center"/>
-            <DockPanel Grid.Row="10" Grid.Column="1">
-                <Button DockPanel.Dock="Right" Content="찾아보기..." Command="{Binding BrowseOutputCommand}" Margin="4,0,0,0"/>
-                <TextBox Text="{Binding OutputPath}"/>
+            <TextBlock Grid.Row="1" Text="출력 파일" VerticalAlignment="Center"/>
+            <DockPanel Grid.Row="1" Grid.Column="1" Margin="0,2">
+                <Button DockPanel.Dock="Right" Content="찾기…" Command="{Binding BrowseOutputCommand}" Margin="4,0,0,0" Padding="6,0"/>
+                <TextBox Text="{Binding OutputPath}" ToolTip="{Binding OutputPath}"/>
             </DockPanel>
-        </Grid>
-        <!-- 품질 태그: 켜면 QualityTagsText를 매 줄 맨 앞에 붙인다. 자기만의 품질 태그
-             워크플로(ComfyUI 등)가 이미 있는 사용자는 꺼둔 채로 두고, 없는 사용자는 켜서
-             이 프로그램만으로 바로 완성된 프롬프트를 뽑을 수 있다. -->
-        <CheckBox DockPanel.Dock="Top" Content="품질 태그를 매 줄 앞에 붙이기" Margin="0,0,0,2"
-                  IsChecked="{Binding QualityTagsEnabled}"
-                  ToolTip="자기만의 품질/안전 등급 태그 워크플로가 따로 있으면 꺼두세요."/>
-        <TextBox DockPanel.Dock="Top" Margin="0,0,0,4" TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="60"
-                 VerticalScrollBarVisibility="Auto"
-                 Text="{Binding QualityTagsText, UpdateSourceTrigger=PropertyChanged}"
-                 Visibility="{Binding QualityTagsEnabled, Converter={StaticResource BoolToVis}}"/>
-        <!-- 여러 레시피 일괄 생성: 켜면 중앙 컬럼(레시피 빌더 자리)에 체크 목록이 크게 뜬다
-             (MainWindow.xaml, BatchRecipeListView) — 빌더는 일괄 생성 모드에선 안 쓰이므로
-             그 공간을 체크리스트가 차지한다. 이 패널(우측)엔 설정·미리보기·생성 결과만 남는다. -->
-        <CheckBox DockPanel.Dock="Top" Content="여러 레시피 일괄 생성" Margin="0,0,0,4"
-                  IsChecked="{Binding IsMultiRecipeMode}"/>
-        <!-- 레시피별 파일 분리: ComfyUI에서 컨셉마다 __와일드카드__로 부르려면 팩당 파일이
-             필요하다. 일괄 생성 모드에서만 의미가 있으므로 그때만 보인다. -->
-        <CheckBox DockPanel.Dock="Top" Content="레시피별로 파일 나누기" Margin="14,0,0,4"
-                  IsChecked="{Binding SplitFilesPerRecipe}"
-                  Visibility="{Binding IsMultiRecipeMode, Converter={StaticResource BoolToVis}}"
-                  ToolTip="위 '파일' 경로의 폴더에 '레시피 이름.txt'로 팩마다 하나씩 씁니다(이름이 겹치면 -2를 붙임)."/>
-        <Grid>
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="1*"/>
-            </Grid.RowDefinitions>
-
-            <!-- 생성은 백그라운드에서 돈다(레시피 수십 개 × 수백 줄이면 몇 초). 도는 동안
-                 버튼은 자동으로 비활성이고, 진행률과 취소 버튼이 그 자리에 나타난다. -->
-            <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,4">
-                <Button Content="미리보기" Command="{Binding PreviewCommand}"/>
-                <Button Content="생성" Command="{Binding GenerateCommand}" Margin="8,0,0,0" FontWeight="Bold"/>
-                <Button Content="■ 취소" Command="{Binding CancelCommand}" Margin="8,0,0,0"
-                        Visibility="{Binding ProgressText, Converter={StaticResource NonEmptyToVis}}"/>
-                <Button Content="📋 복사" Command="{Binding CopyPreviewCommand}" Margin="8,0,0,0"
-                        Visibility="{Binding PreviewText, Converter={StaticResource NonEmptyToVis}}"
-                        ToolTip="미리보기 내용을 클립보드로 복사합니다."/>
-                <TextBlock Text="{Binding ProgressText}" Margin="8,0,0,0" FontSize="11"
-                           Foreground="#555" VerticalAlignment="Center"/>
+            <TextBlock Grid.Row="2" Text="쓰기 방식" VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Margin="0,3">
+                <RadioButton GroupName="WriteMode" Content="덮어쓰기" IsChecked="{Binding IsOverwrite}" Margin="0,0,10,0"/>
+                <RadioButton GroupName="WriteMode" Content="이어쓰기" IsChecked="{Binding IsAppend}" Margin="0,0,10,0"/>
+                <RadioButton GroupName="WriteMode" Content="새 파일" IsChecked="{Binding IsNew}"
+                             ToolTip="같은 이름의 파일이 이미 있으면 아무것도 쓰지 않고 알립니다."/>
             </StackPanel>
-
-            <!-- 결과 모순 리포트: 모순 줄이 있으면 빨간 박스로 표시 -->
-            <Border Grid.Row="1" Background="#FFF3F3" BorderBrush="#E57373" BorderThickness="1"
-                    Margin="0,4,0,0" Padding="6" MaxHeight="140"
-                    Visibility="{Binding ConflictReport, Converter={StaticResource NonEmptyToVis}}">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <TextBlock Text="{Binding ConflictReport}" Foreground="#B71C1C" TextWrapping="Wrap" FontSize="11"/>
-                </ScrollViewer>
-            </Border>
-
-            <DockPanel Grid.Row="2" Margin="0,4,0,0">
-                <!-- 줄 길이 예산(guide.md 24~27태그) — 넘으면 뒤쪽 태그가 밀려 반영이 약해진다. -->
-                <TextBlock DockPanel.Dock="Bottom" Text="{Binding LineStatsText}" FontSize="11"
-                           Foreground="#555" Margin="0,3,0,0" TextWrapping="Wrap"
-                           Visibility="{Binding LineStatsText, Converter={StaticResource NonEmptyToVis}}"/>
-                <TextBox Text="{Binding PreviewText, Mode=OneWay}" IsReadOnly="True"
-                         VerticalScrollBarVisibility="Auto" AcceptsReturn="True" FontFamily="Consolas"/>
-            </DockPanel>
+            <CheckBox Grid.Row="3" Grid.Column="1" Content="레시피마다 파일 따로 (폴더에 이름.txt)" Margin="0,2"
+                      IsChecked="{Binding SplitFilesPerRecipe}"
+                      Visibility="{Binding IsMultiRecipeMode, Converter={StaticResource BoolToVis}}"
+                      ToolTip="위 '출력 파일'의 폴더에 '레시피 이름.txt'로 팩마다 하나씩 씁니다(이름이 겹치면 -2를 붙임)."/>
+            <TextBlock Grid.Row="4" Text="출력 프로필" VerticalAlignment="Center"/>
+            <ComboBox Grid.Row="4" Grid.Column="1" Margin="0,2" ItemsSource="{Binding OutputProfiles}" SelectedItem="{Binding SelectedOutputProfile}"
+                      ToolTip="모델(IL/Anima)별 출력 설정 묶음 — 품질 태그·'_'→공백·빈 줄·자동 정렬과 토큰 기준이 한 번에 바뀝니다. 저장·삭제는 고급 설정에서."/>
+            <!-- 토큰 기준: 지금 적용되는 값(미리보기·결과의 토큰 수, 로그의 '토큰 기준 초과'). 프로필을 고르면 그 값으로 바뀐다. -->
+            <TextBlock Grid.Row="5" Text="토큰 기준" VerticalAlignment="Center"/>
+            <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,2">
+                <ComboBox Width="80" ItemsSource="{Binding ModelKinds}" SelectedItem="{Binding ProfileModel}"
+                          ToolTip="출력을 넣을 모델 — 토큰을 그 모델의 실제 토크나이저로 셉니다(IL = CLIP, Anima = Qwen3)."/>
+                <TextBox Width="50" Margin="4,0,0,0" Text="{Binding ProfileTokenLimitText, UpdateSourceTrigger=PropertyChanged, Delay=300}"
+                         ToolTip="이 토큰 수를 넘는 줄을 주황으로 표시하고 생성 때 로그에 남깁니다. 비우면 모델 기본값."/>
+                <TextBlock Text="  비우면 IL 225 · Anima 512" FontSize="11" Foreground="#777" VerticalAlignment="Center"/>
+            </StackPanel>
         </Grid>
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,8,0,4">
+            <Button Content="미리보기 (F5)" Command="{Binding PreviewCommand}" Padding="10,4"
+                    ToolTip="레시피마다 몇 줄만 뽑아 아래에 띄웁니다(일괄은 레시피마다 3줄, 하나면 10줄). 📌 잠근 줄은 그대로 둡니다."/>
+            <Button Content="생성 (Ctrl+Enter)" Command="{Binding GenerateCommand}" Margin="8,0,0,0" Padding="14,4" FontWeight="Bold"
+                    Background="#1F6FEB" Foreground="White"
+                    ToolTip="파일에 씁니다. 📌 잠근 줄은 결과에 그대로 들어가고 나머지 줄 수만큼만 새로 뽑습니다."/>
+            <Button Content="■ 취소" Command="{Binding CancelCommand}" Margin="8,0,0,0" Padding="6,0"
+                    Visibility="{Binding ProgressText, Converter={StaticResource NonEmptyToVis}}"/>
+        </StackPanel>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding ProgressText}" FontSize="11" Foreground="#555"
+                   Visibility="{Binding ProgressText, Converter={StaticResource NonEmptyToVis}}"/>
+        <TextBlock DockPanel.Dock="Top" Text="{Binding ResultSummaryText}" Foreground="#1B5E20" TextWrapping="Wrap" FontSize="12"
+                   Visibility="{Binding ResultSummaryText, Converter={StaticResource NonEmptyToVis}}"/>
+        <DockPanel DockPanel.Dock="Top" Visibility="{Binding ProblemSummaryText, Converter={StaticResource NonEmptyToVis}}">
+            <Button DockPanel.Dock="Right" Content="로그 보기" Command="{Binding OpenLogCommand}" Padding="6,0" FontSize="11" Margin="4,0,0,0"/>
+            <TextBlock Text="{Binding ProblemSummaryText}" Foreground="#B71C1C" TextWrapping="Wrap" FontSize="12"/>
+        </DockPanel>
+
+        <!-- 아래쪽 고정: 토큰 요약 · 결과 크게 보기 · 고급 설정 -->
+        <Expander DockPanel.Dock="Bottom" Header="{Binding AdvancedSummaryText}" Margin="0,6,0,0">
+            <ScrollViewer MaxHeight="340" VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="4,4,0,0">
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock DockPanel.Dock="Left" Text="시드" Width="40" VerticalAlignment="Center"/>
+                        <TextBox Text="{Binding SeedText}" ToolTip="-1 또는 빈 칸 = 매번 랜덤. 숫자를 넣으면 그 시드로 고정(재현 가능)."/>
+                    </DockPanel>
+                    <CheckBox Content="줄 내 중복 제거" IsChecked="{Binding DedupeWithinLine}"/>
+                    <CheckBox Content="줄 중복 회피" IsChecked="{Binding AvoidDuplicateLines}"/>
+                    <CheckBox Margin="16,0,0,0" IsChecked="{Binding StopWhenExhausted}" IsEnabled="{Binding AvoidDuplicateLines}"
+                              Content="조합이 바닥나면 멈춤 (중복 줄 안 넣음)"
+                              ToolTip="서로 다른 줄을 더 만들 수 없으면 요청 줄 수를 못 채워도 멈춥니다(조합이 작은 레시피는 가능한 조합을 전부 씀). 끄면 중복 줄을 넣어 줄 수를 맞춥니다."/>
+                    <CheckBox Content="모순 태그 회피 (예: long_hair + short_hair)" IsChecked="{Binding AvoidConflicts}"/>
+                    <CheckBox Margin="16,0,0,0" IsChecked="{Binding LocalConflictFiltering}" IsEnabled="{Binding AvoidConflicts}"
+                              Content="슬롯 단위로 먼저 걸러내기 (앞쪽 슬롯 우선)"/>
+                    <CheckBox Content="_→공백 (long_hair → long hair)" IsChecked="{Binding UnderscoreToSpace}"/>
+                    <CheckBox Content="빈도 가중 추첨 (인기 태그 우대)" IsChecked="{Binding WeightedSampling}"/>
+                    <CheckBox Content="태그 순서 자동 배치 (표준 프롬프트 순서)" IsChecked="{Binding AutoOrderTags}"/>
+                    <CheckBox Content="파일에 빈 줄 띄움" IsChecked="{Binding InsertBlankLine}"/>
+                    <CheckBox Content="품질 태그를 매 줄 앞에 붙이기" IsChecked="{Binding QualityTagsEnabled}" Margin="0,4,0,0"/>
+                    <TextBox Margin="16,2,0,0" TextWrapping="Wrap" AcceptsReturn="True" MaxHeight="60" VerticalScrollBarVisibility="Auto"
+                             Text="{Binding QualityTagsText, UpdateSourceTrigger=PropertyChanged}"
+                             Visibility="{Binding QualityTagsEnabled, Converter={StaticResource BoolToVis}}"/>
+                    <CheckBox Content="생성할 때마다 결과 창 자동으로 열기" IsChecked="{Binding AutoOpenResults}" Margin="0,4,0,0"/>
+
+                    <TextBlock Text="출력 프로필 저장" FontWeight="Bold" Margin="0,8,0,2"/>
+                    <WrapPanel>
+                        <TextBox Width="90" Text="{Binding OutputProfileName, UpdateSourceTrigger=PropertyChanged}" ToolTip="프로필 이름(예: Anima, IL)" Margin="0,0,4,2"/>
+                        <Button Content="저장" Command="{Binding SaveOutputProfileCommand}" Padding="6,0" Margin="0,0,4,2"
+                                ToolTip="지금 출력 설정(품질 태그·'_'→공백·빈 줄·자동 정렬)과 위 '토큰 기준'의 모델·숫자를 이 이름으로 저장하고 그 프로필을 고릅니다(같은 이름이면 덮어씀)."/>
+                        <Button Content="삭제" Command="{Binding DeleteOutputProfileCommand}" Padding="6,0" Margin="0,0,0,2"/>
+                    </WrapPanel>
+                    <TextBlock Margin="0,6,0,0" FontSize="11" Foreground="#555" TextWrapping="Wrap"
+                               Text="생성 훅(생성할 때만 끼워 넣는 슬롯)은 툴바의 '생성 훅'에서 설정합니다."/>
+                </StackPanel>
+            </ScrollViewer>
+        </Expander>
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,4,0,0">
+            <Button DockPanel.Dock="Right" Content="결과 크게 보기" Command="{Binding OpenResultsCommand}" Padding="8,1"
+                    ToolTip="결과 목록 · 줄 출처 · 📌 잠금 · 결과 검색 · 줄별 토큰(창은 버튼을 눌렀을 때만 뜹니다)."/>
+            <TextBlock Text="{Binding TokenSummaryText}" FontSize="11" Foreground="#555" TextWrapping="Wrap" VerticalAlignment="Center"/>
+        </DockPanel>
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding LockedCountText}" FontSize="11" Foreground="#6A1B9A"
+                   Visibility="{Binding LockedCountText, Converter={StaticResource NonEmptyToVis}}"/>
+
+        <!-- 미리보기(남는 자리를 다 쓴다): 레시피 이름 머리줄 + 한 줄로 자른 출력 줄(툴팁에 전체) + 토큰 수 -->
+        <Border BorderBrush="#D0D5DB" BorderThickness="1" Margin="0,6,0,0" Background="#FAFBFC">
+            <Grid>
+                <TextBlock Text="미리보기·생성 결과가 여기에 몇 줄 나옵니다." Foreground="#999" Margin="6" FontSize="11"
+                           Visibility="{Binding PreviewLines.Count, Converter={StaticResource ZeroToVis}}"/>
+                <ItemsControl ItemsSource="{Binding PreviewLines}" FontFamily="Consolas, Malgun Gothic" FontSize="11" Margin="4,2">
+                    <ItemsControl.Template>
+                        <ControlTemplate TargetType="ItemsControl">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                <ItemsPresenter/>
+                            </ScrollViewer>
+                        </ControlTemplate>
+                    </ItemsControl.Template>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid>
+                                <TextBlock Text="{Binding Header}" FontFamily="Malgun Gothic" FontWeight="Bold" Foreground="#37474F" Margin="0,4,0,1"
+                                           TextTrimming="CharacterEllipsis"
+                                           Visibility="{Binding IsHeader, Converter={StaticResource BoolToVis}}"/>
+                                <DockPanel Visibility="{Binding IsHeader, Converter={StaticResource InverseBoolToVis}}" ToolTip="{Binding FullText}">
+                                    <TextBlock DockPanel.Dock="Right" Text="{Binding Tokens}" Margin="6,0,0,0">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Foreground" Value="#9E9E9E"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Over}" Value="True">
+                                                        <Setter Property="Foreground" Value="#E65100"/>
+                                                        <Setter Property="FontWeight" Value="Bold"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </Grid>
+        </Border>
     </DockPanel>
 </UserControl>

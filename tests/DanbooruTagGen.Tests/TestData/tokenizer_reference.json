@@ -1,0 +1,762 @@
+[
+ {
+  "text": "",
+  "il": 0,
+  "anima": 0
+ },
+ {
+  "text": "1girl",
+  "il": 2,
+  "anima": 2
+ },
+ {
+  "text": "smile, blush",
+  "il": 3,
+  "anima": 4
+ },
+ {
+  "text": "(smile:1.2), blush",
+  "il": 3,
+  "anima": 4
+ },
+ {
+  "text": "((masterpiece)), best quality",
+  "il": 4,
+  "anima": 5
+ },
+ {
+  "text": "piledriver_\\(sex\\), 1girl",
+  "il": 7,
+  "anima": 9
+ },
+ {
+  "text": "(she looks away shyly:1.1), blush, (tears:0.9)",
+  "il": 9,
+  "anima": 11
+ },
+ {
+  "text": "a(b:1.2)c",
+  "il": 3,
+  "anima": 3
+ },
+ {
+  "text": "(unclosed, tag",
+  "il": 5,
+  "anima": 5
+ },
+ {
+  "text": "closed), tag",
+  "il": 3,
+  "anima": 3
+ },
+ {
+  "text": "(x:abc), y",
+  "il": 5,
+  "anima": 5
+ },
+ {
+  "text": "1girl, 2boys, 3:4, 16:9",
+  "il": 14,
+  "anima": 17
+ },
+ {
+  "text": "score_9, score_8_up, score_7_up",
+  "il": 15,
+  "anima": 13
+ },
+ {
+  "text": "@_@, ^_^, >_<, :d, ;)",
+  "il": 14,
+  "anima": 14
+ },
+ {
+  "text": "a   b    c",
+  "il": 3,
+  "anima": 5
+ },
+ {
+  "text": "tab\there",
+  "il": 2,
+  "anima": 3
+ },
+ {
+  "text": "한글 문장 테스트, 미소",
+  "il": 19,
+  "anima": 10
+ },
+ {
+  "text": "🔞 heart ❤, ✨ sparkle",
+  "il": 7,
+  "anima": 7
+ },
+ {
+  "text": "café naïve résumé",
+  "il": 7,
+  "anima": 7
+ },
+ {
+  "text": "it's don't I'm we'll they've",
+  "il": 10,
+  "anima": 10
+ },
+ {
+  "text": "UPPER Case MiXeD",
+  "il": 3,
+  "anima": 7
+ },
+ {
+  "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "il": 75,
+  "anima": 38
+ },
+ {
+  "text": "long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, long_hair, ",
+  "il": 160,
+  "anima": 161
+ },
+ {
+  "text": "‘curly’ “quotes” — dash … ellipsis",
+  "il": 15,
+  "anima": 12
+ },
+ {
+  "text": "<|endoftext|> literal",
+  "il": 2,
+  "anima": 2
+ },
+ {
+  "text": "日本語のテキスト、中文测试",
+  "il": 22,
+  "anima": 9
+ },
+ {
+  "text": "(((deep:1.3))), (nested (inner:1.2) outer:1.1)",
+  "il": 6,
+  "anima": 7
+ },
+ {
+  "text": "implies:voyeurism",
+  "il": 7,
+  "anima": 6
+ },
+ {
+  "text": "1girl, BREAK, solo",
+  "il": 6,
+  "anima": 6
+ },
+ {
+  "text": "trailing comma, ",
+  "il": 4,
+  "anima": 5
+ },
+ {
+  "text": "smile, collared shirt, holding hands, holding phone, mountain, evening, night sky, sparkle",
+  "il": 20,
+  "anima": 21
+ },
+ {
+  "text": "one eye closed, lying, balcony, night, spring \\(season\\), sunbeam",
+  "il": 16,
+  "anima": 16
+ },
+ {
+  "text": "1girl, solo, crying, school uniform, pleated skirt, neckerchief, standing, holding drink, bag, from behind, classroom, snowflakes",
+  "il": 31,
+  "anima": 33
+ },
+ {
+  "text": "1girl, solo, open mouth, school uniform, pleated skirt, neckerchief, eating, bag, profile, street, chromatic aberration",
+  "il": 30,
+  "anima": 31
+ },
+ {
+  "text": "1girl, solo, open mouth, t-shirt, holding book, jellyfish, glass, dutch angle, looking ahead, aquarium, night, bubbles, fish, aquarium tunnel, coral, dark, glowing",
+  "il": 41,
+  "anima": 42
+ },
+ {
+  "text": "1girl, solo, tears, shirt, hand on own chest, jellyfish, glass, from behind, looking at viewer, aquarium, night, fish, aquarium tunnel, coral, dark, spotlight",
+  "il": 39,
+  "anima": 40
+ },
+ {
+  "text": "1girl, solo, snow, closed eyes, angry, santa hat, crossed arms, gift, string lights, box, from side, christmas tree, indoors, night, window, christmas, sidelighting",
+  "il": 42,
+  "anima": 41
+ },
+ {
+  "text": "1girl, solo, snow, open mouth, santa hat, scarf, holding microphone, gift, string lights, box, dutch angle, looking at another, christmas tree, indoors, night, window, christmas, glowing, motion lines",
+  "il": 47,
+  "anima": 48
+ },
+ {
+  "text": "1girl, solo, hand on own cheek, from below, looking at viewer, window, curtains, indoors, plant, evening, church, blurry background, petals, backlighting, silhouette",
+  "il": 38,
+  "anima": 38
+ },
+ {
+  "text": "1girl, solo, holding cup, from above, looking afar, window, curtains, indoors, plant, day, train interior, backlighting, silhouette, sparkle",
+  "il": 33,
+  "anima": 33
+ },
+ {
+  "text": "1girl, solo, closed eyes, smile, shorts, holding gift, tent, full body, campfire, starry sky, night, tree, mountain, star \\(sky\\), motion blur",
+  "il": 37,
+  "anima": 39
+ },
+ {
+  "text": "1girl, solo, closed eyes, open mouth, all fours, tent, from side, campfire, starry sky, night, tree, mountain, star \\(sky\\)",
+  "il": 35,
+  "anima": 36
+ },
+ {
+  "text": "1girl, solo, smile, swimsuit, carrying, ladder, from side, looking at viewer, pool, poolside, water, tiles, sunlight, motion lines",
+  "il": 32,
+  "anima": 34
+ },
+ {
+  "text": "1girl, solo, closed eyes, serious, swimsuit, hand up, holding cup, ladder, cowboy shot, pool, poolside, water, tiles, steam",
+  "il": 32,
+  "anima": 34
+ },
+ {
+  "text": "1girl, solo, smug, school uniform, sitting, desk, chair, cowboy shot, looking at another, classroom, sunset, chalkboard, indoors, shadow, chromatic aberration, depth of field",
+  "il": 41,
+  "anima": 43
+ },
+ {
+  "text": "1girl, solo, open mouth, school uniform, kneeling, holding bottle, desk, chair, from behind, looking at viewer, classroom, sunset, chalkboard, indoors",
+  "il": 36,
+  "anima": 35
+ },
+ {
+  "text": "1girl, solo, floating hair, crying, long skirt, standing, holding bag, full body, looking at viewer, rooftop, cityscape, skyscraper, building, railing, day, sky",
+  "il": 41,
+  "anima": 40
+ },
+ {
+  "text": "1girl, solo, dress, full body, looking down, rooftop, cityscape, skyscraper, building, railing, day, blurry foreground, light rays",
+  "il": 33,
+  "anima": 32
+ },
+ {
+  "text": "1girl, solo, japanese clothes, holding sword, slashing, dynamic pose, katana, mecha, looking back, motion blur, sparks, blood on weapon, afterimage, foreshortening, motion lines",
+  "il": 44,
+  "anima": 44
+ },
+ {
+  "text": "1girl, solo, closed eyes, japanese clothes, holding sword, slashing, dynamic pose, katana, ice, from below, falling petals, motion blur, sparks, sidelighting, science fiction",
+  "il": 42,
+  "anima": 40
+ },
+ {
+  "text": "1girl, solo, floating hair, open mouth, skirt, midair, falling, wind lift, from above, looking at another, wind, motion blur",
+  "il": 32,
+  "anima": 32
+ },
+ {
+  "text": "1girl, solo, floating hair, blush, skirt, midair, falling, outstretched arms, dutch angle, looking down, wind, motion blur",
+  "il": 31,
+  "anima": 33
+ },
+ {
+  "text": "1girl, solo, smile, game cg, sleepy, victory pose, holding weapon, from behind, looking at viewer, wind, confetti, glowing, light particles",
+  "il": 33,
+  "anima": 34
+ },
+ {
+  "text": "1girl, solo, half-closed eyes, game cg, one eye closed, smile, serious, goth fashion, victory pose, holding weapon, fighting stance, from side, wind, confetti, glowing, motion blur, lens flare",
+  "il": 47,
+  "anima": 49
+ },
+ {
+  "text": "1girl, solo, parted lips, military, holding shield, blocking, fighting stance, shield, looking up, glowing, motion lines, jaggy lines",
+  "il": 32,
+  "anima": 31
+ },
+ {
+  "text": "1girl, solo, clenched teeth, frown, holding shield, blocking, fighting stance, shield, mecha, close-up, looking down, sparks, shadow, speed lines",
+  "il": 38,
+  "anima": 37
+ },
+ {
+  "text": "1girl, smile, armor, goth fashion, horseback riding, holding weapon, dynamic pose, outstretched arm, horse, ice, looking at viewer, blurry background, motion lines, dappled sunlight",
+  "il": 40,
+  "anima": 44
+ },
+ {
+  "text": "1girl, smile, armor, horseback riding, holding weapon, dynamic pose, horse, eye contact, electricity, afterimage, bokeh, science fiction",
+  "il": 31,
+  "anima": 32
+ },
+ {
+  "text": "1girl, solo, happy, holding sword, slashing, outstretched hand, sword, looking up, blurry background, glint, motion lines, blood splatter, laser, emphasis lines, traditional media",
+  "il": 42,
+  "anima": 42
+ },
+ {
+  "text": "1girl, solo, smile, holding sword, slashing, sword, from below, looking ahead, glint, motion lines, sparks, laser",
+  "il": 30,
+  "anima": 29
+ },
+ {
+  "text": "1girl, solo, nude, bouncing breasts, standing, pussy juice, looking at viewer, dutch angle",
+  "il": 22,
+  "anima": 22
+ },
+ {
+  "text": "1girl, solo, nude, standing, looking at viewer, from side",
+  "il": 15,
+  "anima": 15
+ },
+ {
+  "text": "1girl, solo, smile, nude, upper body, looking at viewer, facing viewer, blurry background",
+  "il": 21,
+  "anima": 21
+ },
+ {
+  "text": "1girl, solo, closed mouth, nude, upper body, looking at viewer, facing viewer",
+  "il": 19,
+  "anima": 19
+ },
+ {
+  "text": "1girl, solo, closed mouth, upper body, looking at viewer, dutch angle, dappled sunlight, depth of field",
+  "il": 25,
+  "anima": 27
+ },
+ {
+  "text": "1girl, solo, smile, upper body, looking at viewer, dutch angle, blurry background",
+  "il": 19,
+  "anima": 20
+ },
+ {
+  "text": "1girl, 1boy, hetero, penis, testicles, bruise on face, scar, emaciated, smirk, empty eyes, exhausted, wavy mouth, collar, male pubic hair, topless, against wall, sex, vaginal, grabbing from behind, deep penetration, cum, chained, shackles, candle, crate, wide shot, facing viewer, basement, faceless male, blood",
+  "il": 85,
+  "anima": 85
+ },
+ {
+  "text": "1girl, 1boy, hetero, size difference, muscular male, testicles, bruise, scratches, pubic hair, yandere, scared, wavy mouth, collar, open clothes, huge penis, veiny penis, nipple slip, struggling, arched back, on back, after sex, after vaginal, grabbing another's breast, cumdrip, chained, shackles, cowboy shot, profile, looking down, basement, stone wall, faceless male",
+  "il": 96,
+  "anima": 98
+ },
+ {
+  "text": "1girl, 1boy, hetero, tattoo, crying with eyes open, trembling, collar, leash, open clothes, penis awe, hand on another's face, slave, imminent penetration, humiliation, rough sex, doggystyle, cum on self, full body, dutch angle, looking to the side, sunlight, fireplace, bed sheet, faceless male",
+  "il": 77,
+  "anima": 76
+ },
+ {
+  "text": "1girl, 1boy, hetero, tattoo, embarrassed, collar, leash, crown, bottomless, partially visible vulva, crawling, sitting on lap, spread legs, slave, sex, vaginal, pet play, grabbing another's breast, deep penetration, restrained, rope, upper body, from side, faceless male, sunbeam",
+  "il": 72,
+  "anima": 70
+ },
+ {
+  "text": "1girl, multiple boys, sweat, disgust, glaring, clenched teeth, tears, topless, sparse pubic hair, tied to chair, struggling, clenched hands, grabbing another's hair, forced orgasm, humiliation, rough sex, bdsm, restrained, bound ankles, sex toy, shackles, candle, wide shot, profile, faceless male, window shadow",
+  "il": 81,
+  "anima": 75
+ },
+ {
+  "text": "1girl, 1boy, crying, despair, crying with eyes open, screaming, clothes pull, dark anus, bent over, pulling, face grab, forced orgasm, saliva, bdsm, restrained, egg vibrator, vibrator, shackles, pillory, lantern, barbed wire, looking up, wide shot, profile, faceless male, confession",
+  "il": 76,
+  "anima": 71
+ },
+ {
+  "text": "1girl, 1boy, navel piercing, no pupils, empty eyes, @_@, expressionless, open clothes, pubic tattoo, bouncing breasts, hand in pocket, grabbing another's hair, rape, sex, vaginal, rough sex, deep penetration, prone bone, pussy juice, cum on hair, couch, barrel, looking to the side, wide shot, profile, faceless male",
+  "il": 85,
+  "anima": 81
+ },
+ {
+  "text": "1girl, 1boy, wet face, clitoris, no pupils, empty eyes, trembling, sweatdrop, expressionless, casual, nipple piercing, pubic tattoo, torn panties, hand on another's face, rape, sex, vaginal, rough sex, standing sex, ejaculation, cum in pussy, facial, candle, full body, from above, alley, faceless male, stain",
+  "il": 86,
+  "anima": 80
+ },
+ {
+  "text": "1girl, hetero, 1boy, sweat, wet, glowing eyes, no pupils, empty eyes, penis awe, hand on another's face, thigh grab, carrying person, hypnosis, mind control, rape, imminent penetration, couch, full body, profile, curtains, faceless male",
+  "il": 61,
+  "anima": 61
+ },
+ {
+  "text": "1girl, hetero, 1boy, sweat, no pupils, @_@, against wall, hypnosis, mind control, rape, sex, vaginal, rough sex, grabbing another's breast, deep penetration, pussy juice, cum in pussy, cum string, park bench, desk, bottle, wide shot, from side, faceless male",
+  "il": 73,
+  "anima": 70
+ },
+ {
+  "text": "1girl, hetero, 1boy, size difference, muscular male, testicles, sweat, wet, crying, trembling, nose blush, huge penis, veiny penis, bouncing breasts, hand on another's head, strangling, sitting, oral, fellatio, humiliation, rape, cum in mouth, facial, cum string, bottle, looking at viewer, full body, dutch angle, indoors, bathroom, faceless male, window shadow",
+  "il": 94,
+  "anima": 92
+ },
+ {
+  "text": "1girl, hetero, 1boy, size difference, muscular male, testicles, tears, scared, crying, nose blush, open shirt, huge penis, veiny penis, penis awe, grabbing another's hair, standing, oral, fellatio, humiliation, rape, saliva, chair, looking at viewer, wide shot, from side, indoors, office, curtains, faceless male",
+  "il": 84,
+  "anima": 80
+ },
+ {
+  "text": "1girl, size difference, scared, trembling, crying, disgust, collar, leash, torn clothes, bell, huge penis, bestiality, humiliation, doggystyle, restrained, horse, full body, from side, farm",
+  "il": 51,
+  "anima": 48
+ },
+ {
+  "text": "1girl, size difference, trembling, tears, collar, leash, bell, huge penis, on back, bestiality, sex, vaginal, humiliation, deep penetration, restrained, horse, full body, straight-on, outdoors",
+  "il": 52,
+  "anima": 46
+ },
+ {
+  "text": "1girl, hetero, 1boy, biting own lip, blush, trembling, embarrassed, heavy breathing, sex, vaginal, deep penetration, spooning, restrained, full body, from below, bedroom, night, curtains, bed, faceless male, shadow",
+  "il": 57,
+  "anima": 54
+ },
+ {
+  "text": "1girl, hetero, 1boy, sweat, embarrassed, wide-eyed, trembling, biting own lip, on back, sex, vaginal, heavy breathing, ejaculation, restrained, pillow, blanket, futon, wide shot, facing viewer, bedroom, night, faceless male, shadow",
+  "il": 64,
+  "anima": 59
+ },
+ {
+  "text": "1girl, hetero, 1boy, quadruple amputee, amputee, sweat, dirty, crying, clenched teeth, wide-eyed, bandages, clothes pull, chain, on back, rape, heavy breathing, imminent penetration, grabbing another's breast, restrained, full body, from side, indoors, bedroom, faceless male, backlighting",
+  "il": 77,
+  "anima": 75
+ },
+ {
+  "text": "1girl, hetero, 1boy, quadruple amputee, amputee, scratches, bruise, scared, wide-eyed, tears, trembling, exhausted, crying, bandages, completely nude, rape, after sex, after vaginal, grabbing another's ass, cumdrip, restrained, couch, bucket, full body, facing viewer, indoors, faceless male, shadow, stain",
+  "il": 83,
+  "anima": 82
+ },
+ {
+  "text": "1girl, 1boy, sweat, clenched teeth, trembling, parted lips, collar, chain, nude, large areolae, spread legs, sitting on person, cum on body, bound, restrained, human furniture, chained, pedestal, tray, upper body, looking at viewer, straight-on, indoors, faceless male, shadow",
+  "il": 74,
+  "anima": 70
+ },
+ {
+  "text": "1girl, expressionless, collar, nude, all fours, bent over, bound, restrained, human furniture, shibari, footstool, candle, cowboy shot, from below, indoors, bookshelf, dust, dark",
+  "il": 47,
+  "anima": 47
+ },
+ {
+  "text": "1girl, hetero, 1boy, sweat, expressionless, empty eyes, sweatdrop, ring, wedding ring, open shirt, netorare, cheating \\(relationship\\), sex, vaginal, deep penetration, mating press, clock, pov, full body, from side, indoors, faceless male, recording, shadow",
+  "il": 68,
+  "anima": 66
+ },
+ {
+  "text": "1girl, hetero, 1boy, forced smile, tears, body blush, ring, open clothes, dark nipples, v, against glass, netorare, cheating \\(relationship\\), sex, vaginal, ejaculation, cum in pussy, smartphone, wine glass, pov, full body, from above, indoors, faceless male, shadow",
+  "il": 72,
+  "anima": 69
+ },
+ {
+  "text": "1girl, hetero, 1boy, tearing up, furrowed brow, wedding dress, bride, white gloves, elbow gloves, open clothes, torso grab, sex, vaginal, heavy breathing, sex from behind, ejaculation, cum in pussy, cum on clothes, bouquet, cowboy shot, from side, indoors, hallway, faceless male, shadow",
+  "il": 76,
+  "anima": 73
+ },
+ {
+  "text": "1girl, hetero, 1boy, sweat, tearing up, closed mouth, frown, wedding dress, bride, elbow gloves, white gloves, open clothes, dress lift, sex, vaginal, grabbing another's ass, clothed sex, full nelson, full body, profile, indoors, bathroom, curtains, faceless male, backlighting",
+  "il": 71,
+  "anima": 72
+ },
+ {
+  "text": "1girl, 1boy, hetero, brother and sister, messy hair, empty eyes, shorts, panties aside, biting, bent over, incest, after sex, cumdrip, wide shot, facing viewer, indoors, day, sunlight, curtains, tatami, faceless male",
+  "il": 58,
+  "anima": 59
+ },
+ {
+  "text": "1girl, 1boy, hetero, brother and sister, sweat, clenched teeth, shorts, no bra, grabbing another's chin, bent over, incest, sex, vaginal, heavy breathing, couch, looking at viewer, full body, from above, indoors, night, faceless male, dark",
+  "il": 64,
+  "anima": 63
+ },
+ {
+  "text": "1girl, hetero, mature female, multiple boys, facial tattoo, wavy mouth, drooling, no bra, partially visible vulva, bouncing breasts, bent over, netorare, cheating \\(relationship\\), sex, vaginal, group sex, grabbing another's ass, gangbang, cum on hair, condom in mouth, alcohol, bottle, cowboy shot, profile, looking back, indoors, window, faceless male, light particles",
+  "il": 88,
+  "anima": 88
+ },
+ {
+  "text": "1girl, hetero, mature female, multiple boys, shoulder tattoo, irezumi, empty eyes, penis awe, shirt lift, puckered anus, biting, hand on another's stomach, netorare, cheating \\(relationship\\), imminent penetration, gangbang, sex from behind, pussy juice, used condom, condom, alcohol, full body, facing viewer, indoors, curtains, faceless male, glowing",
+  "il": 87,
+  "anima": 82
+ },
+ {
+  "text": "1girl, empty eyes, nose blush, pajamas, mole on breast, panties aside, under covers, vaginal, tentacle sex, deep penetration, cum, tentacles, restrained, tentacle pit, monster, pillow, cowboy shot, from above, looking down, bedroom, night, window, curtains",
+  "il": 64,
+  "anima": 62
+ },
+ {
+  "text": "1girl, nipples, scared, tongue out, pajamas, bottomless, bound together, struggling, irrumatio, tentacle in mouth, vaginal, tentacles, restrained, monster, pillow, cowboy shot, facing viewer, looking back, bedroom, night, window, vines, curtains",
+  "il": 60,
+  "anima": 59
+ },
+ {
+  "text": "1girl, 1boy, hetero, clitoris, wet, trembling, nude, hug, bent over, sex, vaginal, ejaculation, cum in pussy, wide shot, profile, night, indoors, apartment, fire, faceless male",
+  "il": 55,
+  "anima": 50
+ },
+ {
+  "text": "1girl, 1boy, hetero, clitoris, crying, tearing up, trembling, nude, hug, face-to-face, after sex, after vaginal, candle, full body, from side, night, indoors, bedroom, faceless male, smoke",
+  "il": 57,
+  "anima": 53
+ },
+ {
+  "text": "3girls, multiple boys, hetero, age difference, height difference, bruise, large breasts, small breasts, curvy, wide hips, thick thighs, skinny, narrow waist, nipples, pain, clenched teeth, tears, saliva trail, nude, group sex, sex, vaginal, rough sex, grabbing another's ass, grabbing another's breast, orgy, gangbang, mating press, pussy juice, full body, from side, outdoors, campfire, faceless male",
+  "il": 99,
+  "anima": 97
+ },
+ {
+  "text": "3girls, multiple boys, hetero, age difference, height difference, mature female, scratches, huge breasts, small breasts, plump, slim legs, narrow waist, scared, trembling, tears, undressing, huge ass, mole on breast, dragging, struggling, on back, group sex, grabbing another's breast, orgy, gangbang, saliva, wide shot, straight-on, outdoors, campfire, faceless male",
+  "il": 90,
+  "anima": 86
+ },
+ {
+  "text": "1girl, tongue out, breasts out, v, licking finger, cum on tongue, cum overflow, looking at viewer, upper body, profile, bathroom",
+  "il": 31,
+  "anima": 31
+ },
+ {
+  "text": "1girl, runny makeup, tongue out, nude, v, licking finger, cum on fingers, looking at viewer, upper body, dutch angle, bedroom",
+  "il": 32,
+  "anima": 33
+ },
+ {
+  "text": "1girl, solo, sweat, wide-eyed, nude, masturbation, dildo, cowboy shot, from side, bathroom",
+  "il": 28,
+  "anima": 23
+ },
+ {
+  "text": "1girl, solo, sweat, embarrassed, undressing, masturbation, dildo, cowboy shot, from below, bedroom",
+  "il": 27,
+  "anima": 23
+ },
+ {
+  "text": "1girl, clenched teeth, trembling, tearing up, nude, arched back, orgasm, upper body, looking at viewer, facing viewer, bedroom",
+  "il": 33,
+  "anima": 31
+ },
+ {
+  "text": "1girl, clenched teeth, trembling, tearing up, nude, arched back, orgasm, heavy breathing, couch, upper body, looking at viewer, from below",
+  "il": 36,
+  "anima": 34
+ },
+ {
+  "text": "1girl, solo focus, expressionless, empty eyes, averting eyes, open coat, thigh boots, crop top, short shorts, presenting, holding phone, adjusting clothes, rough sex, doggystyle, cum in pussy, condom, upper body, from side, night, love hotel, faceless male",
+  "il": 65,
+  "anima": 64
+ },
+ {
+  "text": "1girl, solo, expressionless, empty eyes, averting eyes, open coat, thigh boots, miniskirt, tube top, fishnets, presenting, adjusting clothes, leaning forward, cum on body, looking back, upper body, facing viewer, night, alley",
+  "il": 56,
+  "anima": 55
+ },
+ {
+  "text": "1girl, multiple boys, solo focus, runny makeup, blush, disembodied penis, breasts out, facial, bukkake, cum string, looking at viewer, cowboy shot, profile, bathroom, faceless male",
+  "il": 47,
+  "anima": 45
+ },
+ {
+  "text": "1girl, multiple boys, solo focus, blush, disembodied penis, undressing, facial, bukkake, cum on hair, cum pool, cum bath, couch, looking at viewer, cowboy shot, from side, faceless male",
+  "il": 51,
+  "anima": 49
+ },
+ {
+  "text": "1girl, hetero, bruise, exhausted, playboy bunny, detached collar, wrist cuffs, pantyhose, torn leotard, hand on another's face, bent over, rape, humiliation, after sex, after vaginal, grabbing another's ass, restrained, cowboy shot, dutch angle, stage, faceless male",
+  "il": 67,
+  "anima": 68
+ },
+ {
+  "text": "1girl, hetero, streaming tears, playboy bunny, detached collar, wrist cuffs, pantyhose, torn leotard, panty pull, hand on another's neck, head grab, hand on another's face, sitting on lap, rape, humiliation, sex, vaginal, restrained, wine glass, cowboy shot, from below, indoors, faceless male",
+  "il": 76,
+  "anima": 75
+ },
+ {
+  "text": "1girl, 1boy, sweat, (sitting astride a very dark ebony-skinned tribesman lying beneath her and facing the viewer, one hand propped behind her on his thigh and her other hand planted on her own knee, rolling her hips shamelessly with a wide, delighted open-mouthed grin and bright wide eyes, her painted breasts bouncing with the nipple rings swinging and sweat dripping from her chin:1.1), dark-skinned male, mouth drool, (tribal tattoo:1.2), bodypaint, armpit hair, hip tattoo, navel piercing, facepaint, heart-shaped pupils, grin, open mouth, blush, (a thin round metal ring through one nostril:1.0), nose ring, bouncing breasts, nipple rings, vaginal, (a frame from a handheld video recording, with a camcorder viewfinder overlay, a small red recording dot and corner brackets in the frame, her gaze straight into the lens:1.0), cowgirl position, pussy juice, looking at viewer, cowboy shot, from below, (a small sleeping corner of a primitive hut partitioned off by large flat woven mats standing against the walls, nothing in it but a low heap of straw covered with a plain coarse cloth on the bare earthen floor, dim amber evening light and deep shadows, the stale humid air of a closed room:1.0), hut, indoors, dim lighting, evening, shadow, faceless male, motion lines, viewfinder",
+  "il": 282,
+  "anima": 284
+ },
+ {
+  "text": "1girl, 2boys, sweat, (straddling one very dark ebony-skinned tribesman while sucking off a second one standing at her side with his huge cock held up to her lips, more naked tribespeople tangled together on the straw behind them in the dim hut, her face smeared with fluids and her tongue out:1.1), dark-skinned male, hut, mouth drool, tears, (tribal tattoo:1.2), bodypaint, armpit hair, (a ring of tiny teardrop-shaped tattoo marks circling each nipple:1.0), breast tattoo, stomach tattoo, tongue out, blush, saliva trail, empty eyes, nipple rings, large penis, tramp stamp, holding camera, vaginal, (seen from the camera operator's own viewpoint with his bare thighs and the hand gripping the camera at the bottom edge of the frame, and she grins into the lens as he films her:1.0), fellatio, group sex, heavy breathing, cowgirl position, (so much heavy, clumped semen packed inside her that it bulges out of her slowly instead of dripping:1.1), cum overflow, (semen so thick and clumpy that it holds its shape, hanging from her chin in long gooey strands that stretch down over her chest:1.1), cum string, full body, looking at viewer, pov, faceless male, motion lines, recording",
+  "il": 264,
+  "anima": 270
+ },
+ {
+  "text": "1girl, solo focus, quadruple amputee, scar, sweat, (pain:1.4), (clenched teeth:1.2), (grimace:1.3), (screaming:1.3), (a piglet from a previous litter squeals nearby:1.2), collar, (her limbless body is chained down in the open, unable to move or resist:1.3), (body writing:1.2), (guro:1.2), bestiality, (rough sex:1.2), (cum:1.1), cum string, saliva, pig, wire, tube, cowboy shot, from above, (hay:1.1), (out of frame:1.2)",
+  "il": 94,
+  "anima": 109
+ },
+ {
+  "text": "1girl, solo focus, scar, tears, drooling, collar, (body writing:1.2), (guro:1.2), (tentacle sex:1.2), (tentacles coil around her limbs holding her in place, and penetrate her holes and her mouth all at once:1.4), (a separate thin tentacle wraps around and squeezes each of her nipples:1.2), (impregnation:1.3), cum in pussy, cumdrip, (cum:1.1), facial, tentacles, bound arms, bound legs, monster, wire, wide shot, facing viewer, (barn:1.1), (out of frame:1.2)",
+  "il": 101,
+  "anima": 112
+ },
+ {
+  "text": "1girl, 1boy, (a merchant methodically inspecting every inch of the slave girl's body with clinical, businesslike hands, deciding whether she is worth the price before he buys her:1.3), barefoot, (dirty face:1.2), (empty eyes:1.2), loincloth, business suit, suit, wrist cuffs, collar, (ear tag:1.2), chain, standing, spread legs, (his hand gripping her jaw, prying her mouth open to inspect her teeth:1.2), slave, (humiliation:1.2), from behind, looking back, indoors, stone floor",
+  "il": 102,
+  "anima": 110
+ },
+ {
+  "text": "1girl, 1boy, (a merchant methodically inspecting every inch of the slave girl's body with clinical, businesslike hands, deciding whether she is worth the price before he buys her:1.3), (age difference:1.1), barefoot, (dirty face:1.2), (embarrassed:1.1), tears, robe, collar, chain, completely nude, (body writing:1.2), standing, arms behind back, spread legs, thigh grab, (self hug:1.2), slave, (humiliation:1.2), indoors, (market:1.2)",
+  "il": 86,
+  "anima": 98
+ },
+ {
+  "text": "1girl, 1boy, (slap mark:1.2), tears, (a soldier of the fallen regime, now spoils belonging to the victorious army:1.1), (she is taken from behind on her hands and knees, what little is left of her uniform hanging off her, no one paying her face any mind beyond the use of her body, treated like something that belongs to all of them equally now:1.3), (epaulettes:1.1), military uniform, (torn clothes:1.2), (armband:1.1), (vaginal:1.2), rape, (doggystyle:1.2), (cum in pussy:1.2), flag, cowboy shot, indoors, (blood from mouth:1.2)",
+  "il": 112,
+  "anima": 127
+ },
+ {
+  "text": "1girl, (bruise:1.2), (empty eyes:1.3), (exhausted:1.3), (a soldier of the fallen regime, now spoils belonging to the victorious army:1.1), (she is left lying motionless among the wreckage with her legs still spread apart, her well-used entrance gaping open and leaking their cum, more of it drying in streaks across her stomach and chest and face from all of them, her torn epaulettes discarded on the floor beside her like garbage, old fading bruises visible beneath fresh new ones, evidence that tonight was far from the first time and will not be the last, her eyes empty as she no longer even reacts:1.3), (bloodshot eyes:1.2), (nosebleed:1.2), (epaulettes:1.1), military uniform, (collar:1.2), (armband:1.1), (completely nude:1.2), (spread pussy:1.2), (gaping:1.2), (cum in pussy:1.2), (bukkake:1.2), (excessive cum:1.2), cowboy shot, indoors, broken glass",
+  "il": 173,
+  "anima": 194
+ },
+ {
+  "text": "1girl, 1boy, wide hips, sweat, messy hair, exhausted, tears, yoga pants, (she stayed behind after the meditation session ended and the rest of the class had already left, alone with the instructor on the mat:1.2), (she is left lying motionless on the yoga mat, her exhausted body unable to move:1.3), sports bra, wet clothes, breasts out, pants pull, after sex, cum in pussy, yoga mat, exercise ball, wide shot, indoors",
+  "il": 95,
+  "anima": 97
+ },
+ {
+  "text": "1girl, 1boy, wide hips, sweat, messy hair, scared, tears, yoga pants, (she stayed behind after the meditation session ended and the rest of the class had already left, alone with the instructor on the mat:1.2), (he offers to help her with one last partner stretch, then forces her legs open right there on the mat before she understands what is happening:1.3), sports bra, wet clothes, pants pull, vaginal, rape, missionary, yoga mat, cowboy shot, indoors, studio",
+  "il": 100,
+  "anima": 102
+ },
+ {
+  "text": "1girl, 1boy, messy hair, ahegao, (a curse means she can only ever truly love one man, yet it also makes her irresistible to every other man alive, and he intends to use that against her, one carefully engineered line at a time:1.2), (he reaches a depth inside her that no one has ever touched before, and what little resistance she had left finally gives out completely:1.3), drooling, tears, vaginal, mating press, cum in pussy, cowboy shot, indoors, faceless male",
+  "il": 103,
+  "anima": 106
+ },
+ {
+  "text": "1girl, 1boy, tattoo, sweat, (a curse means she can only ever truly love one man, yet it also makes her irresistible to every other man alive, and he intends to use that against her, one carefully engineered line at a time:1.2), (he marks her body with a glowing brand as proof that she now belongs to him entirely, and she no longer resists at all:1.3), smile, tears, vaginal, cowgirl position, cum in pussy, cowboy shot, indoors, faceless male",
+  "il": 102,
+  "anima": 103
+ },
+ {
+  "text": "1girl, 2boys, solo focus, (size difference:1.3), petite, (muscular male:1.2), (both men are massively built, towering over her and dwarfing her small frame with ease:1.2), neck tattoo, scared, (still weakly struggling, held aloft and taken from both ends at once regardless:1.3), spread legs, leg grab, struggling, fellatio, irrumatio, oral, group sex, vaginal, (spitroast:1.3), (reverse suspended congress:1.3), sex from behind, mmf threesome, deep penetration, cum in mouth, cum overflow, cum on body, full body, indoors, hotel room, (faceless male:1.1)",
+  "il": 122,
+  "anima": 130
+ },
+ {
+  "text": "1girl, 2boys, solo focus, (size difference:1.3), petite, orc, (both of the hulking attackers are green-skinned orcs:1.2), monster boy, sweat, (completely limp, held aloft like dead weight and taken from both ends at once:1.3), arm tattoo, heart tattoo, half-closed eyes, empty eyes, exhausted, trembling, spread legs, leg grab, fellatio, irrumatio, oral, group sex, vaginal, (spitroast:1.3), (reverse suspended congress:1.3), sex from behind, mmf threesome, deep penetration, cum in mouth, full body, indoors",
+  "il": 120,
+  "anima": 125
+ },
+ {
+  "text": "1girl, solo, clitoris, nipples, pussy, (in a close shot from above with her face large, she kneels at the water's edge with her knees apart as foamy waves wash over her thighs, her left hand braced on the wet sand and her right hand down between her legs, looking up at the viewer:1.3), sweat, body blush, nervous, parted lips, blush, competition swimsuit, (her sun-warmed body is flushing pink and getting wetter by the minute, her nipples stiff and her thighs restless:1.3), one-piece swimsuit pull, (the oil-slick fingertips of her right hand rub her swollen clit in quick, tight circles:1.3), breasts out, (her one-piece competition swimsuit is peeled down under her bare breasts and its crotch is pulled aside, baring her pussy:1.3), kneeling, heavy breathing, pussy juice, from above, cowboy shot, (out in the open in broad daylight, she is terrified and thrilled at once by how easily she could be caught like this:1.3), looking at viewer, (she breathes in quick, shallow little gasps through barely parted lips:1.3), outdoors, day, sunlight, beach, (grains of sand cling to her oiled thighs and hips:1.2), shore, (sun-bleached sand glares bright all around her:1.2), (a pale tan line from her one-piece marks her shoulders and hips:1.2)",
+  "il": 275,
+  "anima": 277
+ },
+ {
+  "text": "1girl, solo, bikini tan, nipples, pussy, (in a close shot from the thighs up with her face large, she reclines against a smooth seaside rock with both hands pulling her thighs wide apart for the viewer, looking at the viewer:1.3), sweat, pubic hair, trembling, nervous, biting own lip, blush, (she is deep into it now, her hips rocking and her oiled body quivering in the heat:1.3), nose blush, (she lets the hot sun soak into every bare, glistening inch of her:1.3), (she is fully bare, the crisp pale shapes of her bikini tan standing out on her sun-kissed skin:1.3), nude, pubic tattoo, sitting, spread legs, (out in the open in broad daylight, she is terrified and thrilled at once by how easily she could be caught like this:1.3), hand on own thigh, (she nibbles her lower lip, her cheeks burning pink under the sun:1.3), pussy juice stain, cowboy shot, looking at viewer, outdoors, day, sunlight, rock, horizon",
+  "il": 207,
+  "anima": 211
+ },
+ {
+  "text": "1girl, hetero, solo focus, 1boy, wedding ring, rape, orgasm, (Her bound wrists rest above her head at the center of the futon, she has lost count of how many times he has taken her today. Her hips twitch and clench around him against her will as another climax washes over her, her tear-streaked face caught between fresh sobs and involuntary pleasure:1.3), vaginal, missionary, saliva, bound wrists, full body, indoors, tatami, faceless male",
+  "il": 106,
+  "anima": 104
+ },
+ {
+  "text": "1girl, hetero, solo focus, 1boy, pregnant, tattoo, sweat, (She squats low at the center of the frame, spreading herself open with her own fingers above a pool of cum soaking into the tatami. Her swollen pregnant belly and the floral tattoos across her skin catch the lamp light as she smiles down at the mess between her heels:1.3), wedding ring, spread pussy, squatting, cum pool, cowboy shot, indoors, tatami, faceless male",
+  "il": 96,
+  "anima": 98
+ },
+ {
+  "text": "1girl, solo, sweat, bare back, (a small vine-and-flower tattoo sits boldly on her hip, showing no matter which way she turns:1.4), hip tattoo, (a small black cat silhouette tattoo sits on her ankle:1.4), cat tattoo, (standing with her back to the viewer, one hand reaching up to the undone fastenings at her spine, the bodice of her white wedding gown peeled down to reveal her bare back and shoulders:1.3), (a chain of small flowers tattooed in a line up her upper arm:1.4), arm tattoo, (a large dragon tattoo coils across her back and over one shoulder in bold black ink, an unmistakably full traditional irezumi piece:1.4), dragon tattoo, (a small star-shaped tattoo sits along the side of her neck and collarbone, dark ink standing out sharply against pale skin:1.4), neck tattoo, navel piercing, (mascara:1.3), makeup, seductive smile, smile, parted lips, tongue out, bridal veil, high heels, wedding dress, necklace, undressing, dress pull, sparse pubic hair, nipple piercing, (huge ass:1.3), standing, (a small circular tattoo rings the edge of her anus, only visible when she is bent over or on all fours:1.4), spread legs, hands on own hips, finger to mouth, pussy juice, from behind, full body, indoors, window",
+  "il": 267,
+  "anima": 272
+ },
+ {
+  "text": "1girl, solo, sweat, bare back, (a small star tattoo sits on her shoulder:1.4), shoulder tattoo, (a small heart tattoo sits on the inside of her wrist:1.4), heart tattoo, (standing with her back to the viewer, one hand reaching up to the undone fastenings at her spine, the bodice of her white wedding gown peeled down to reveal her bare back and shoulders:1.3), (a chain of small flowers tattooed in a line up her upper arm:1.4), arm tattoo, (smeared lipstick:1.3), makeup, (wide hips:1.22), (thick thighs:1.11), seductive smile, smile, parted lips, tongue out, licking lips, bridal veil, high heels, wedding dress, tiara, undressing, dress pull, sparse pubic hair, nipple piercing, presenting, standing, spread legs, pussy juice, candle, from behind, cowboy shot, indoors",
+  "il": 167,
+  "anima": 176
+ },
+ {
+  "text": "1girl, solo, pussy, sweat, bruise, (a flower and vine tattoo wraps around her ankle in fine black linework:1.2), flower tattoo, (perched on the edge of the kitchen counter and propped back on both hands, her legs hanging wide apart off the edge as cum drips down the cabinet doors below:1.2), (wide hips:1.18), trembling, exhausted, open mouth, blush, (runny makeup:1.06), makeup, open shirt, naked shirt, (her pussy is flushed red and swollen from the pounding it just took, puffy and still twitching:1.2), gaping, fat mons, dark nipples, (a small tattoo is inked directly onto the outer lips of her pussy, right at the edge where they part, only visible when her legs are spread:1.2), pubic tattoo, sitting, spread legs, after sex, after vaginal, (heavy breathing:1.1), cum on legs, cumdrip, full body, indoors, kitchen, on counter",
+  "il": 186,
+  "anima": 192
+ },
+ {
+  "text": "1girl, solo, pussy, (her nipples are puffy and reddened, a ring of faint bite marks around one areola:1.1), nipples, bite mark, (her hair is tangled and plastered to her damp skin:1.1), messy hair, trembling, (perched on the edge of the kitchen counter and propped back on both hands, her legs hanging wide apart off the edge as cum drips down the cabinet doors below:1.2), (embarrassed:1.1), averting eyes, full-face blush, wavy mouth, open shirt, naked shirt, stray pubic hair, (her pussy is flushed red and swollen, still slightly gaping and twitching:1.1), gaping, pussy, (a small star tattoo sits on one cheek of her bare ass, done in black ink:1.2), ass tattoo, (a small tattoo is inked directly onto the outer lips of her pussy, right at the edge where they part, only visible when her legs are spread:1.2), pubic tattoo, sitting, spread legs, after sex, after vaginal, spanked, cum on breasts, excessive pussy juice, pussy juice puddle, full body, indoors, kitchen, on counter, steaming body",
+  "il": 230,
+  "anima": 233
+ },
+ {
+  "text": "1girl, 1boy, hetero, (a thin band tattoo wraps around her ankle, done in black ink:1.1), tattoo, (made to kneel and spread herself open for her new owner's inspection, trembling as he decides to try her out right there on the spot:1.2), (sweat beads along her skin:1.1), sweat, completely nude, kneeling, vaginal, (she's been left with nothing on at all:1.1), full body, faceless male, motion lines",
+  "il": 91,
+  "anima": 95
+ },
+ {
+  "text": "1girl, 1boy, hetero, pubic hair, (it's become routine now, pulled from wherever she was resting each morning and bent over the nearest surface without a word needing to be said:1.2), (a small rose tattoo sits on her shoulder, done in black ink:1.1), tattoo, (sweat beads along her skin:1.1), sweat, clothes pull, bent over, vaginal, sex from behind, (her clothes have been shoved aside rather than removed:1.1), cowboy shot, faceless male, motion lines",
+  "il": 98,
+  "anima": 103
+ },
+ {
+  "text": "1girl, 1boy, hetero, (solo focus:1.2), sweat, bruise, messy hair, expressionless, clenched teeth, (a captured female spy in a torn black infiltration suit is interrogated and raped by an enemy officer in uniform:1.2), torn bodysuit, military uniform, necktie, (facing the viewer, she is bent over the desk with her wrists handcuffed behind her back, the uniformed officer pinning her down from behind as he takes her:1.2), black gloves, breasts out, captured, bent over, arms behind back, rape, humiliation, vaginal, sex, (she keeps her face cold and blank to give nothing away, only the sweat on her skin betraying the strain:1.2), sex from behind, saliva, handcuffs, desk, facing viewer, cowboy shot, looking at viewer, indoors, industrial pipe, dim lighting, (faceless male:1.1)",
+  "il": 176,
+  "anima": 180
+ },
+ {
+  "text": "1girl, 1boy, hetero, (solo focus:1.2), blush, trembling, furrowed brow, torn bodysuit, military uniform, (a captured female spy in a torn black infiltration suit is interrogated and raped by an enemy officer in uniform:1.2), chain, breasts out, captured, (seen from the side, her wrists are shackled high on the wall by chains so that she hangs half on her toes while the officer holds one of her thighs up and takes her standing:1.2), against wall, arms up, leg lift, rape, humiliation, vaginal, sex, moaning, heavy breathing, (against her training her body begins to answer, flushed and trembling, a broken moan escaping despite the glare she tries to keep:1.2), shackles, desk lamp, table, from side, cowboy shot, looking at viewer, indoors, (faceless male:1.1), backlighting",
+  "il": 176,
+  "anima": 178
+ },
+ {
+  "text": "1girl, 1boy, hetero, solo focus, constricted pupils, caught, surprised, wide-eyed, open mouth, body blush, open shirt, naked shirt, (facing the viewer who has just walked in, she is on her hands and knees on a bed in the middle of the room with a man taking her from behind:1.3), all fours, hand on another's hip, netorare, cheating \\(relationship\\), sex, vaginal, (she freezes mid-act and stares in shock at whoever has just walked in, her eyes wide and her mouth open while the man is still inside her:1.3), sex from behind, pillow, facing viewer, cowboy shot, looking at viewer, bedroom, indoors, door, night, faceless male, walk-in",
+  "il": 156,
+  "anima": 154
+ },
+ {
+  "text": "1girl, 1boy, hetero, solo focus, sweat, caught, embarrassed, blush, nude, hand on another's waist, covering own mouth, (facing the viewer who has just walked in, she sits astride a man on a bed in the middle of the room, her hips still moving:1.3), netorare, cheating \\(relationship\\), sex, vaginal, girl on top, (flustered and embarrassed at being seen, she claps a hand over her mouth and turns toward the person who just walked in, unable to push the man away:1.3), saliva, facing viewer, cowboy shot, looking back, bedroom, indoors, door, bed sheet, faceless male, walk-in",
+  "il": 140,
+  "anima": 142
+ },
+ {
+  "text": "1girl, sweat, nipples, large breasts, thick thighs, (in a close shot from the thighs up with her face large, she sits on a stone step to rest while the breeze loosens her collar and blows the hem apart over her knees:1.3), barefoot, shiny skin, kanzashi, blush, (the yukata is open and her breasts are bare:1.3), (embarrassed:1.3), full-face blush, wavy mouth, (her whole face burns red as she scrambles:1.3), yukata, open kimono, white kimono, (the stone steps of a shrine rise behind her:1.3), short kimono, (accidental exposure:1.3), breasts out, (it is deep night:1.3), naked kimono, sitting, heavy breathing, (her cheeks are flushed and her breath catches, nipples stiff with arousal:1.3), looking at viewer, cowboy shot, outdoors, shrine, torii, stairs, night",
+  "il": 167,
+  "anima": 180
+ },
+ {
+  "text": "1girl, 1boy, sweat, ass, large breasts, (in a close shot from behind with her face large and turned over her shoulder, she keeps walking while a hand from behind keeps squeezing her rear at every step and she bites back any sound:1.3), barefoot, shiny skin, blush, (embarrassed:1.3), full-face blush, wavy mouth, trembling, yukata, blue kimono, (only a hint shows, sideboob and the shape of her nipples through damp cloth:1.3), sideboob, covered nipples, (her whole face burns red as she scrambles:1.3), no panties, walking, grabbing another's ass, (a bench under a tree stands behind her:1.3), groping, pussy juice, (a street lamp lights her from above:1.3), bench, from behind, looking back, cowboy shot, (a slick sheen of arousal glistens on her inner thighs and her hips tremble:1.3), outdoors, tree, night, lamppost, faceless male",
+  "il": 191,
+  "anima": 199
+ },
+ {
+  "text": "1girl, solo, sweat, ass, large breasts, shoulder tattoo, (in a close shot from behind with her face large and turned over her shoulder, resting between poses she lies flat on her stomach along the mat with her legs slightly parted, glancing back:1.3), open mouth, furrowed brow, full-face blush, trembling, blush, (her skin-tight black yoga pants and sports bra are soaked dark with sweat, clinging to every line of her body:1.3), yoga pants, sports bra, skin tight, black sports bra, wet clothes, (early morning sunlight streams through the gap between half-drawn curtains onto her body:1.3), yoga, on stomach, (heavy breathing:1.1), (she pants with her mouth open:1.3), pussy juice, yoga mat, from behind, looking back, (a slick sheen of arousal glistens on her inner thighs and her hips tremble:1.3), cowboy shot, indoors, (beads of sweat roll down her neck and between her breasts:1.2), curtains, sunlight, light rays",
+  "il": 198,
+  "anima": 202
+ },
+ {
+  "text": "1girl, solo, sweat, nipples, large breasts, determined, (in a close high-angle shot from above with her face large, she lies on her back with her knees bent and feet planted on the mat, lifting her hips high off the floor, her torso arched:1.3), parted lips, trembling, sports bra, yoga pants, breasts out, puffy nipples, (mid-stretch her sweat-damp sports bra has ridden up over her chest, her bare breasts slipping out from under it:1.3), yoga, lying, on back, arched back, (she is alone in the empty locker room of her fitness club after the evening class, her mat rolled out between the benches:1.3), (heavy breathing:1.1), orgasm, (she holds the pose, breathing hard:1.3), pussy juice trail, yoga mat, locker, (her whole body locks up as she comes hard, thighs shaking, juice streaming down:1.3), from above, looking at viewer, cowboy shot, indoors, locker room, (her whole body glistens with a slick sheen of sweat, her skin flushed and steaming:1.2), steaming body, shiny skin, (a thin string of arousal slides down the inside of her thigh:1.2)",
+  "il": 233,
+  "anima": 237
+ },
+ {
+  "text": "1girl, solo, sweat, nipples, (in a close shot from the thighs up with her face large, she lies on her stomach on the mat propped on her forearms, shoulders rising and falling, hair stuck to her sweaty skin:1.3), pussy, large breasts, thick thighs, biting own lip, trembling, (her sports bra is soaked and her thong is hooked aside:1.3), sports bra, thong, panties aside, large areolae, on stomach, (she bites her lip:1.3), arm support, (a slick sheen of arousal glistens on her inner thighs and her hips tremble:1.3), pussy juice, yoga mat, looking at viewer, cowboy shot, (sweat beads roll down her neck and between her breasts:1.2), indoors, sunlight",
+  "il": 149,
+  "anima": 154
+ },
+ {
+  "text": "1girl, solo, sweat, large breasts, (in a close shot from the thighs up with her face large, she lies on her stomach on the mat propped on her forearms, shoulders rising and falling, hair stuck to her sweaty skin:1.3), thick thighs, shiny skin, hair spread out, trembling, sports bra, (her sports bra and workout panties are soaked and clinging:1.3), panties, wet panties, wet clothes, covered nipples, on stomach, (she breathes hard, flushed and sweaty:1.3), arm support, (a slick sheen of arousal glistens on her inner thighs and her hips tremble:1.3), heavy breathing, pussy juice, yoga mat, looking at viewer, cowboy shot, indoors, night",
+  "il": 144,
+  "anima": 144
+ },
+ {
+  "text": "1girl, solo, nipples, pussy, large breasts, thick thighs, (in a close shot from the thighs up with her face large, she is strapped into a chair with her wrists cuffed behind the backrest and her ankles locked apart and a leather belt across her waist:1.3), tongue out, drooling, trembling, collar, sitting, arms behind back, spread legs, orgasm, (a numbered tag dangles from her collar like an item being catalogued:1.3), female ejaculation, (a vibrator is strapped against her clit and humming:1.3), pussy juice puddle, restrained, bondage, (her tongue lolls out, drool on her chin:1.3), bound wrists, bound ankles, (fully marked and broken in, she comes again and again, squirting, begging to be used:1.3), vibrator, sex toy, chair, looking at viewer, cowboy shot, indoors, steaming body",
+  "il": 181,
+  "anima": 176
+ },
+ {
+  "text": "1girl, solo, navel, pussy, huge breasts, curvy, (in a close shot from the thighs up with her face large, she kneels with her wrists cuffed behind her back and her thighs forced apart, her chest thrust forward:1.3), shiny skin, empty eyes, drooling, trembling, blush, collar, (a lewd heart-shaped crest is inked across her lower belly, still red around the edges:1.3), pubic tattoo, kneeling, (a dildo is buried deep in her, held in place by a strap:1.3), arms behind back, spread legs, object insertion, orgasm, (her eyes are glazed, lost to it:1.3), pussy juice trail, restrained, (she comes hard with the fresh marks still raw on her skin, body locking up:1.3), bondage, bound wrists, dildo, sex toy, looking at viewer, cowboy shot, indoors, (red marks from the cuffs ring her wrists:1.2)",
+  "il": 188,
+  "anima": 184
+ },
+ {
+  "text": "1girl, hetero, 1boy, (she was sent from a jeweled kingdom of the south:1.3), (she is a noble lady named in the treaty as a pledge:1.3), (on her first night as tribute she is proud and composed, carrying her homeland honor:1.3), nipples, (in a bare stone tower chamber of the captured castle:1.3), sweat, large breasts, (in a close shot from the thighs up with her face large, she sits on a low ledge with her thighs pulled apart as the commander kneels between them and takes her:1.3), (strands of hair fall across her wet eyes:1.1), hair over eyes, clenched teeth, tearing up, trembling, tiara, jewelry, necklace, see-through clothes, (rows of gold jewelry over a sheer silk wrap that hides nothing:1.3), sitting, spread legs, vaginal, sex, (she grits her teeth and endures it for her people:1.3), cumdrip, cowboy shot, looking at viewer, (she takes it as ordered, for her people:1.3), indoors, ceiling, (the commander is pale with cropped fair hair and a scarred jaw:1.1), (distant drums and shouts of the victory celebration carry in:1.1), stone wall, bed, faceless male",
+  "il": 232,
+  "anima": 244
+ },
+ {
+  "text": "1girl, hetero, 1boy, (she was sent from a western kingdom of crowns and stone:1.3), (she is a court dancer sent as a showpiece of tribute:1.3), (a few nights on, her composure is cracking:1.3), nipples, (in a marble bath chamber heavy with steam:1.3), (the commander has dark skin and a heavy build:1.1), dark-skinned male, large breasts, blush, (in a close shot from the side with her face turned toward the viewer, she is laid back along the edge of a table with her legs hanging as the commander stands between them and takes her:1.3), nose blush, trembling, (mascara runs down her cheeks in dark streaks:1.2), runny makeup, (her cheeks are flushed despite herself:1.1), blush, tiara, veil, necklace, dress lift, on table, lying, on back, (a thin veil over her hair and her skirt lifted, jewels at her throat:1.3), spread legs, vaginal, sex, heavy breathing, (her breath catches as her body betrays her:1.3), cum in pussy, cumdrip, bathtub, from side, (he finishes inside her to seal the victory:1.3), cowboy shot, looking at viewer, indoors, ceiling, (he makes her say that she belongs to him:1.1), (he talks to his officers as if she were not there:1.1), bathroom, (a cold night wind rattles the shutters:1.1), steam, faceless male",
+  "il": 269,
+  "anima": 287
+ },
+ {
+  "text": "1girl, 1boy, sweat, messy hair, (a curse means she can only ever truly love one man, yet it also makes her irresistible to every other man alive, and he intends to use that against her, one carefully engineered line at a time:1.2), (pushed right to the brink, she finally breaks and begs him for it herself, giving him exactly the opening her curse required:1.3), blush, tears, (begging:1.3), vaginal, missionary, wide shot, (she tries to look away but her eyes keep returning to him:1.1), looking at viewer, indoors, faceless male",
+  "il": 114,
+  "anima": 119
+ },
+ {
+  "text": "1girl, 1boy, tattoo, messy hair, (a curse means she can only ever truly love one man, yet it also makes her irresistible to every other man alive, and he intends to use that against her, one carefully engineered line at a time:1.2), (he marks her body with a glowing brand as proof that she now belongs to him entirely, and she no longer resists at all:1.3), smile, vaginal, heavy breathing, parted lips, cowgirl position, cum in pussy, cowboy shot, indoors, faceless male",
+  "il": 108,
+  "anima": 108
+ }
+]

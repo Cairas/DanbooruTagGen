@@ -24,6 +24,8 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     /// <summary>태그 추가 자동완성용 조회. 앱 시작 전(TagDb 로드 전)이면 null — 자동완성만
     /// 조용히 비활성화되고 직접 타이핑은 그대로 동작한다.</summary>
     private readonly TagDatabase? _tagDb;
+    /// <summary>태그 칩의 입력 즉시 검사(사전에 없는 태그 빨갛게)용 조회.</summary>
+    public Core.Generation.ITagLookup? TagInfo => _tagDb;
 
     /// <summary>이 미리보기에서 태그를 고칠 때마다 불린다. 번들 팩을 앱 안에서 고치면 다음
     /// 프리셋 갱신 때 덮어써지므로, 그 사실을 고치는 순간 알려 주려고 라이브러리가 건다.</summary>
@@ -185,11 +187,10 @@ public sealed partial class SlotPreviewViewModel : ObservableObject
     }
 }
 
-/// <summary>전체 검사 결과 한 줄 — 지적이 나온 팩 하나와 그 지적들.</summary>
-public sealed record AuditRow(string RecipeId, string RecipeName, IReadOnlyList<Core.Generation.ValidationIssue> Issues)
+/// <summary>전체 검사 결과 한 줄 — 손볼 것이 있는 팩 하나와 점검 리포트(🩺 점검·tools/RecipeCheck와 같은 기준).</summary>
+public sealed record AuditRow(string RecipeId, string RecipeName, int MustFix, string Detail)
 {
-    public string Header => $"{RecipeName} — {Issues.Count}건";
-    public string Detail => string.Join("\n", Issues.Select(i => "· " + i.Message));
+    public string Header => $"{RecipeName} — 손볼 것 {MustFix}건";
 }
 
 /// <summary>레시피(슬롯 구성 전체)를 이름 붙여 여러 개 저장/불러오기. Pool 라이브러리는 태그
@@ -224,6 +225,21 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
 
     /// <summary>"⭐ 즐겨찾기만" 체크 — 성인/검색/카테고리와 AND로 결합.</summary>
     [ObservableProperty] private bool _showFavoritesOnly;
+    /// <summary>"🆕 새로·바뀜만" 체크 — 프리셋 갱신으로 들어왔거나 바뀐 뒤 아직 안 열어 본 레시피만.</summary>
+    [ObservableProperty] private bool _showChangedOnly;
+
+    public const string SortDefault = "기본 순서";
+    public const string SortRecentlyAdded = "최근 추가순";
+    public const string SortRecentlyChanged = "최근 수정순";
+    public const string SortRecentlyUsed = "최근 사용순";
+    public const string SortByName = "이름순";
+    public string[] SortModes { get; } = { SortDefault, SortRecentlyAdded, SortRecentlyChanged, SortRecentlyUsed, SortByName };
+    /// <summary>목록 정렬. "기본 순서"는 예전 그대로(일반 → 성인, recipes.json 순서). "최근 추가순"은 그 역순(새 프리셋은 맨 뒤에 붙는다).</summary>
+    [ObservableProperty] private string _sortMode = SortDefault;
+    /// <summary>분류(Category)별로 접었다 펼 수 있게 묶어 보기.</summary>
+    [ObservableProperty] private bool _groupByCategory;
+    /// <summary>"🆕 3 · ✏️ 1" — 아직 안 열어 본 새/바뀐 레시피 수. 없으면 빈 문자열(체크박스·버튼도 숨김).</summary>
+    [ObservableProperty] private string _changedCountText = "";
     /// <summary>선택 레시피가 즐겨찾기인지(버튼 라벨/상태 바인딩용). SelectedRecipe나
     /// 즐겨찾기 목록이 바뀔 때마다 갱신.</summary>
     [ObservableProperty] private bool _selectedRecipeIsFavorite;
@@ -233,6 +249,172 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
 
     /// <summary>선택 레시피의 검증 지적("없는 태그"·"상대 없는 행위"). 비어 있으면 문제 없음.</summary>
     [ObservableProperty] private string _validationText = "";
+
+    /// <summary>고른 레시피의 고치기 전 내용(직렬화). 첫 편집 때 기준 버전으로 남기고 비운다.</summary>
+    private (string Id, string Json)? _baseline;
+
+    /// <summary>선택 레시피 점검 리포트(검증·모순·조합·길이·명목 대비 실측) — tools/RecipeCheck와 같은 Core 리포트.</summary>
+    [RelayCommand]
+    private async Task CheckSelected()
+    {
+        if (SelectedRecipe is not { } selected) { _main.Status = "점검할 레시피를 고르세요."; return; }
+        var copy = RecipeMeasure.Clone(selected);
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+        var opts = _main.Generation.SnapshotOptions();
+        var (rules, tags, requires) = (_main.Conflicts, _main.TagInfo, _main.Requires);
+        var hooks = _main.Hooks.ToList();
+        _main.Status = $"'{selected.Name}' 점검 중…";
+        try
+        {
+            var il = Core.Tokenization.TokenCounters.For(Core.Tokenization.ModelKind.IL, AppPaths.TokenizersDir);
+            var anima = Core.Tokenization.TokenCounters.For(Core.Tokenization.ModelKind.Anima, AppPaths.TokenizersDir);
+            var (_, text) = await Task.Run(() => Core.Generation.RecipeCheckReport.Build(copy, pools, opts, rules, tags, requires, hooks, Suggest,
+                il: il, anima: anima));
+            var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
+                        ?? System.Windows.Application.Current.MainWindow;
+            new Views.ReportWindow($"점검 — {selected.Name}", text) { Owner = owner }.Show();
+            _main.Status = "점검 완료 — " + text.Split('\n')[^1];
+        }
+        catch (Core.Generation.GenerationValidationException ex) { _main.Status = "점검할 수 없음 — 검증 오류: " + ex.Message; }
+        catch (InvalidOperationException ex) { _main.Status = "점검 중 오류(다시 시도하세요): " + ex.Message; }
+    }
+
+    /// <summary>선택 레시피 요약(마크다운: 슬롯·브랜치·후보 + 실측 지표)을 클립보드로 — 다른 작업 세션에 그대로 넘기는 용도.</summary>
+    [RelayCommand]
+    private async Task CopySummary()
+    {
+        if (SelectedRecipe is not { } selected) { _main.Status = "요약할 레시피를 고르세요."; return; }
+        var copy = RecipeMeasure.Clone(selected);
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+        var opts = _main.Generation.SnapshotOptions();
+        var (rules, tags) = (_main.Conflicts, _main.TagInfo);
+        _main.Status = "요약 만드는 중…";
+        string md;
+        try
+        {
+            md = await Task.Run(() => Core.Output.RecipeMarkdown.Export(copy, pools,
+                Core.Generation.RecipeProfiler.Measure(copy, pools, opts, rules, tags, RecipeMeasure.SampleLines)));
+        }
+        catch (Core.Generation.GenerationValidationException)
+        {
+            md = Core.Output.RecipeMarkdown.Export(copy, pools);   // 생성이 안 되는 레시피도 구조는 보여 준다
+        }
+        try
+        {
+            System.Windows.Clipboard.SetText(md);
+            _main.Status = $"'{selected.Name}' 요약(마크다운 {md.Split(Environment.NewLine).Length}줄)을 클립보드에 복사했습니다.";
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            _main.Status = "클립보드를 다른 프로그램이 쓰고 있어 복사하지 못했습니다. 잠시 후 다시 시도하세요.";
+        }
+    }
+
+    /// <summary>지운 제공 팩 창(다시 넣기).</summary>
+    [RelayCommand]
+    private void ShowDeletedPresets()
+    {
+        var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
+                    ?? System.Windows.Application.Current.MainWindow;
+        new Views.DeletedPresetsWindow(_main) { Owner = owner }.Show();
+    }
+
+    /// <summary>선택 레시피의 버전 목록 창(비교·되돌리기·새 레시피로 복제).</summary>
+    [RelayCommand]
+    private void ShowVersions()
+    {
+        if (SelectedRecipe is not { } selected) { _main.Status = "버전을 볼 레시피를 고르세요."; return; }
+        var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
+                    ?? System.Windows.Application.Current.MainWindow;
+        new Views.RecipeVersionsWindow(this, selected) { Owner = owner }.Show();
+    }
+
+    /// <summary>버전을 지금 레시피에 되돌린다(id는 그대로). 되돌리기 전 내용도 버전으로 남기고, 제공 팩이면 번들 소스에도 되쓴다.</summary>
+    public void RestoreVersion(Recipe target, Recipe version, DateTime versionTime)
+    {
+        _main.RecordRecipeVersion(target, "되돌리기 전");
+        target.Name = version.Name;
+        target.Category = version.Category;
+        target.Labels = version.Labels.ToList();
+        target.DefaultLineCount = version.DefaultLineCount;
+        target.Slots = RecipeMeasure.Clone(version).Slots;
+        if (!ReferenceEquals(SelectedRecipe, target) && FilteredRecipes.Contains(target)) SelectedRecipe = target;
+        RebuildPreview();
+        RefreshBadges();
+        RefreshFilter();
+        _main.SaveRecipeLibrary();
+        WarnIfBundled();
+        _main.Status = $"'{target.Name}'을(를) {versionTime:MM-dd HH:mm} 버전으로 되돌렸습니다(되돌리기 전 내용도 버전에 남겼습니다).";
+    }
+
+    /// <summary>버전을 새 레시피로 복제한다(지금 레시피는 그대로).</summary>
+    public void CloneVersionAsNew(Recipe source, Recipe version, DateTime versionTime)
+    {
+        var copy = RecipeMeasure.Clone(version);
+        copy.Id = Guid.NewGuid().ToString("N");
+        copy.Name = $"{version.Name} ({versionTime:MM-dd HH:mm} 버전)";
+        var insertAt = Recipes.IndexOf(source) + 1;
+        Recipes.Insert(insertAt > 0 ? insertAt : Recipes.Count, copy);
+        SyncToMain();
+        RefreshBadges();
+        RefreshFilter();
+        if (FilteredRecipes.Contains(copy)) SelectedRecipe = copy;
+        _main.Status = $"'{copy.Name}'(으)로 복제했습니다.";
+    }
+
+    /// <summary>두 레시피 비교 리포트를 띄운다(⚖ 비교·버전 비교 공용).</summary>
+    public async Task ShowComparisonAsync(Recipe a, string nameA, Recipe b, string nameB)
+    {
+        var ca = RecipeMeasure.Clone(a);
+        var cb = RecipeMeasure.Clone(b);
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+        var opts = _main.Generation.SnapshotOptions();
+        var (rules, tags) = (_main.Conflicts, _main.TagInfo);
+        _main.Status = "레시피 비교 중…";
+        try
+        {
+            var (pa, pb) = await Task.Run(() => (
+                Core.Generation.RecipeProfiler.Measure(ca, pools, opts, rules, tags),
+                Core.Generation.RecipeProfiler.Measure(cb, pools, opts, rules, tags)));
+            var text = Core.Output.RecipeProfileText.Compare(pa, nameA, pb, nameB, opts.Seed);
+            var owner = System.Windows.Application.Current.Windows.OfType<System.Windows.Window>().FirstOrDefault(w => w.IsActive)
+                        ?? System.Windows.Application.Current.MainWindow;
+            new Views.ReportWindow("레시피 비교", text) { Owner = owner }.Show();
+            _main.Status = "레시피 비교 완료";
+        }
+        catch (Core.Generation.GenerationValidationException ex) { _main.Status = "비교할 수 없음 — 검증 오류: " + ex.Message; }
+        catch (InvalidOperationException ex) { _main.Status = "비교 중 오류(다시 시도하세요): " + ex.Message; }
+    }
+
+    /// <summary>수정 전/후 비교. Ctrl로 두 레시피를 골랐으면 목록에서 앞에 있는 쪽이 A(보통 옛 버전 — 새 id는 뒤에 붙는다),
+    /// 하나만 골랐으면 그 저장본(A)과 레시피 빌더의 현재 구성(B). 같은 시드·생성 탭 옵션으로 잰다(훅 제외).</summary>
+    [RelayCommand]
+    private async Task CompareSelected()
+    {
+        var picked = _multiSelected.Distinct().ToList();
+        Recipe a, b;
+        string nameA, nameB;
+        if (picked.Count == 2)
+        {
+            picked.Sort((x, y) => Recipes.IndexOf(x).CompareTo(Recipes.IndexOf(y)));
+            (a, b) = (picked[0], picked[1]);
+            (nameA, nameB) = (a.Name, b.Name);
+        }
+        else if (picked.Count <= 1 && SelectedRecipe is { } selected)
+        {
+            (a, b) = (selected, _main.RecipeBuilder.BuildRecipe());
+            (nameA, nameB) = ($"{selected.Name} (저장본)", "레시피 빌더의 현재 구성");
+        }
+        else
+        {
+            _main.Status = "비교할 레시피를 고르세요 — 하나(빌더의 현재 구성과 비교) 또는 Ctrl로 두 개.";
+            return;
+        }
+
+        await ShowComparisonAsync(a, nameA, b, nameB);
+    }
+
+
     /// <summary>전체 검사 결과 요약 + 진행률. 검사 중에는 진행률이, 끝나면 요약이 들어간다.</summary>
     [ObservableProperty] private string _auditSummary = "";
     /// <summary>전체 검사에서 지적이 나온 팩만. 클릭하면 그 팩으로 이동한다.</summary>
@@ -311,9 +493,13 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     {
         _main = main;
         Recipes = new ObservableCollection<Recipe>(main.SavedRecipes);
+        // 저장해 둔 정렬·묶기(필드에 직접 — 변경 알림으로 설정을 되쓰지 않게).
+        _sortMode = SortModes.Contains(main.Settings.RecipeSortMode) ? main.Settings.RecipeSortMode : SortDefault;
+        _groupByCategory = main.Settings.RecipeGroupByCategory;
         RefreshBadges();
         RefreshCategories();
         RefreshFilter();
+        ApplyGrouping();
     }
 
     partial void OnRecipeFilterChanged(NsfwFilterMode value) => RefreshFilter();
@@ -324,12 +510,83 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
 
     partial void OnShowFavoritesOnlyChanged(bool value) => RefreshFilter();
 
+    partial void OnShowChangedOnlyChanged(bool value) => RefreshFilter();
+
+    partial void OnSortModeChanged(string value)
+    {
+        _main.Settings.RecipeSortMode = value;
+        RefreshFilter();
+    }
+
+    partial void OnGroupByCategoryChanged(bool value)
+    {
+        _main.Settings.RecipeGroupByCategory = value;
+        ApplyGrouping();
+    }
+
+    /// <summary>목록 보기(ICollectionView)에 분류 묶음을 걸거나 푼다. 묶음 순서는 정렬된 목록에서 그 분류가 처음 나오는 순서다.</summary>
+    private void ApplyGrouping()
+    {
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(FilteredRecipes);
+        view.GroupDescriptions.Clear();
+        if (GroupByCategory)
+            view.GroupDescriptions.Add(new System.Windows.Data.PropertyGroupDescription(nameof(Recipe.Category), new CategoryGroupConverter()));
+    }
+
+    private sealed class CategoryGroupConverter : System.Windows.Data.IValueConverter
+    {
+        public object Convert(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) =>
+            value is string s && s.Length > 0 ? s : "(미분류)";
+        public object ConvertBack(object value, Type targetType, object parameter, System.Globalization.CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+
+    /// <summary>정렬 키를 한 번에 모은다(최근 수정은 버전 폴더를 훑으므로 정렬할 때만).</summary>
+    private Func<Recipe, IComparable> SortKey(IReadOnlyList<Recipe> recipes)
+    {
+        switch (SortMode)
+        {
+            case SortRecentlyAdded:
+            {
+                var index = new Dictionary<Recipe, int>(ReferenceEqualityComparer.Instance);
+                for (int i = 0; i < Recipes.Count; i++) index[Recipes[i]] = i;
+                return r => -index.GetValueOrDefault(r);
+            }
+            case SortRecentlyChanged:
+            {
+                // Recipe는 Equals를 재정의하지 않아 기본 비교가 곧 참조 비교다.
+                var changed = recipes.ToDictionary(r => r, r => Core.Persistence.RecipeHistoryStore.LastChanged(AppPaths.HistoryDir, r.Id) ?? DateTime.MinValue);
+                return r => -changed[r].Ticks;
+            }
+            case SortRecentlyUsed:
+                return r => -(_main.Settings.RecipeLastUsed.TryGetValue(r.Id, out var t) ? t.Ticks : 0);
+            case SortByName:
+                return r => r.Name.StartsWith("🔞", StringComparison.Ordinal) ? r.Name[2..].TrimStart() : r.Name;
+            default:
+                return _ => 0;
+        }
+    }
+
+    /// <summary>🆕/✏️ 표시를 전부 지운다("다 봤다").</summary>
+    [RelayCommand]
+    private void ClearChangeMarks()
+    {
+        _main.ClearRecipeChangeMarks();
+        RefreshBadges();
+        ShowChangedOnly = false;
+        RefreshFilter();
+    }
+
     partial void OnSelectedRecipeChanged(Recipe? value)
     {
         RebuildPreview();
         RefreshValidation();
         QuickPreviewText = "";
         SelectedRecipeIsFavorite = value != null && _main.Settings.FavoriteRecipeIds.Contains(value.Id);
+        // 열어 봤으니 🆕/✏️ 표시를 지운다. 목록의 배지 글자는 다음 목록 갱신 때 사라진다(지금 지우면 방금 고른 게 무엇이었는지 헷갈린다).
+        if (value != null && _main.MarkRecipeSeen(value.Id)) RefreshChangedCount();
+        // 버전 기록의 기준점: 고르기만 할 땐 파일을 안 쓰고 고치기 전 내용을 메모리에 잡아 둔다 — 첫 편집 때 남긴다(WarnIfBundled).
+        _baseline = value != null ? (value.Id, Core.Persistence.RecipeHistoryStore.Serialize(value)) : null;
         OnPropertyChanged(nameof(SelectedRecipeLabelsText));
         OnPropertyChanged(nameof(SelectedRecipeCategory));
     }
@@ -489,11 +746,21 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     /// 되돌리고 싶을 때를 위해 덮어쓰기 전 기존 파일을 .bak로 남긴다(둘 다).</summary>
     private void WarnIfBundled()
     {
+        // 편집이 모두 여기를 지난다(태그 추가·삭제·슬롯 이동) — 버전을 남긴다(연속 편집은 합쳐진다).
+        // 이 레시피의 첫 편집이면 먼저 고르던 때 내용을 기준 버전으로(마지막 버전과 같으면 안 쓴다).
+        if (SelectedRecipe != null && _baseline is { } b && b.Id == SelectedRecipe.Id)
+        {
+            _main.RecordRecipeVersion(b.Json, b.Id, SelectedRecipe.Name, Core.Persistence.RecipeHistoryStore.BaselineReason);
+            _baseline = null;
+        }
+        if (SelectedRecipe != null) _main.RecordRecipeVersion(SelectedRecipe, Core.Persistence.RecipeHistoryStore.EditReason);
         if (SelectedRecipe == null || !_main.IsBundled(SelectedRecipe.Id)) return;
         var fileName = SelectedRecipe.Id + ".json";
         var targets = new List<string> { Path.Combine(AppPaths.PresetRecipesDir, fileName) };
         if (AppPaths.RepoSourceRecipesDir is { } repoDir)
             targets.Add(Path.Combine(repoDir, fileName));
+        // 개발 모드면 두 경로가 같은 파일이다 — 두 번 쓰지 않는다.
+        targets = targets.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var failures = new List<string>();
         foreach (var path in targets)
@@ -530,12 +797,13 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
     {
         FilteredRecipes.Clear();
         var search = SearchText.Trim();
-        var ordered = Recipes
+        var filtered = Recipes
             .Where(r => string.IsNullOrWhiteSpace(search)
                 || r.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
                 || UsesTag(r, search))
             .Where(r => SelectedCategory == AllCategoriesLabel || r.Category == SelectedCategory)
             .Where(r => !ShowFavoritesOnly || _main.Settings.FavoriteRecipeIds.Contains(r.Id))
+            .Where(r => !ShowChangedOnly || r.ChangeBadge.Length > 0)
             .Select(r => (Recipe: r, IsNsfw: IsNsfwRecipe(r)))
             .Where(x => RecipeFilter switch
             {
@@ -543,8 +811,12 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
                 NsfwFilterMode.NsfwOnly => x.IsNsfw,
                 _ => true,
             })
-            .OrderBy(x => RecipeDisplayOrder.IsPinnedToBottom(x.Recipe))
-            .ThenBy(x => x.IsNsfw)
+            .ToList();
+        // "테스트" 라벨은 어떤 정렬에서도 맨 아래. 기본 순서는 예전 그대로(일반 → 성인, 목록 순서 — OrderBy는 안정 정렬).
+        var key = SortMode == SortDefault ? null : SortKey(filtered.Select(x => x.Recipe).ToList());
+        var ordered = (key is null
+                ? filtered.OrderBy(x => RecipeDisplayOrder.IsPinnedToBottom(x.Recipe)).ThenBy(x => x.IsNsfw)
+                : filtered.OrderBy(x => RecipeDisplayOrder.IsPinnedToBottom(x.Recipe)).ThenBy(x => key(x.Recipe)))
             .Select(x => x.Recipe);
 
         foreach (var r in ordered) FilteredRecipes.Add(r);
@@ -616,26 +888,40 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         OnPropertyChanged(nameof(HasAuditRows));
         AuditSummary = "검사 중…";
 
+        var opts = _main.Generation.SnapshotOptions();
+        var il = Core.Tokenization.TokenCounters.For(Core.Tokenization.ModelKind.IL, AppPaths.TokenizersDir);
+        var anima = Core.Tokenization.TokenCounters.For(Core.Tokenization.ModelKind.Anima, AppPaths.TokenizersDir);
         try
         {
+            // 🩺 점검·tools/RecipeCheck와 같은 기준(RecipeCheckReport, 등장률 분석은 빼고). 레시피끼리는 독립이라 병렬로.
             var found = await Task.Run(() =>
             {
-                var rows = new List<AuditRow>();
-                for (int i = 0; i < snapshot.Count; i++)
+                var rows = new AuditRow?[snapshot.Count];
+                int done = 0;
+                Parallel.For(0, snapshot.Count, new ParallelOptions { CancellationToken = token }, i =>
                 {
-                    token.ThrowIfCancellationRequested();
-                    var issues = Core.Generation.RecipeValidator.Validate(snapshot[i], pools, lookup, hooks: hooks, requires: requires, conflicts: conflicts);
-                    if (issues.Count > 0)
-                        rows.Add(new AuditRow(snapshot[i].Id, snapshot[i].Name, issues));
-                }
-                return rows;
+                    try
+                    {
+                        var (summary, text) = Core.Generation.RecipeCheckReport.Build(snapshot[i], pools, opts, conflicts, lookup, requires, hooks,
+                            Suggest, deep: false, sampleLines: 300, il: il, anima: anima);
+                        if (summary.MustFix > 0) rows[i] = new AuditRow(snapshot[i].Id, snapshot[i].Name, summary.MustFix, text);
+                    }
+                    catch (Core.Generation.GenerationValidationException ex)
+                    {
+                        rows[i] = new AuditRow(snapshot[i].Id, snapshot[i].Name, 1, "생성할 수 없음 — " + ex.Message);
+                    }
+                    int n = Interlocked.Increment(ref done);
+                    if (n % 20 == 0)
+                        System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => AuditSummary = $"검사 중… {n}/{snapshot.Count}");
+                });
+                return rows.Where(r => r != null).Select(r => r!).OrderByDescending(r => r.MustFix).ToList();
             }, token);
 
             foreach (var row in found) AuditRows.Add(row);
             OnPropertyChanged(nameof(HasAuditRows));
             AuditSummary = found.Count == 0
-                ? $"✅ {snapshot.Count}개 팩 전부 이상 없음"
-                : $"⚠ {snapshot.Count}개 중 {found.Count}개 팩에서 지적 {found.Sum(r => r.Issues.Count)}건";
+                ? $"✅ {snapshot.Count}개 팩 전부 손볼 것 없음"
+                : $"⚠ {snapshot.Count}개 중 {found.Count}개 팩에 손볼 것 {found.Sum(r => r.MustFix)}건(검증·항상 모순·조합 빠듯)";
         }
         catch (OperationCanceledException) { AuditSummary = "검사 취소됨"; }
     }
@@ -739,7 +1025,18 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
             recipes[i].ConflictBadge = conflict[i];
             recipes[i].VarietyBadge = variety[i];
             recipes[i].OriginBadge = _main.IsBundled(recipes[i].Id) ? "📦" : "";
+            recipes[i].ChangeBadge = _main.ChangeBadgeOf(recipes[i].Id);
         }
+        RefreshChangedCount();
+    }
+
+    private void RefreshChangedCount()
+    {
+        var marks = _main.Settings.RecipeChangeMarks;
+        int fresh = marks.Values.Count(m => m.Kind == Core.Persistence.RecipeChangeKind.New);
+        int changed = marks.Count - fresh;
+        ChangedCountText = marks.Count == 0 ? "" : string.Join(" · ",
+            new[] { fresh > 0 ? $"🆕 {fresh}" : "", changed > 0 ? $"✏️ {changed}" : "" }.Where(x => x.Length > 0));
     }
 
     /// <summary>MAJOR 축 조합 수가 부족하면("이 팩은 매 줄이 비슷해 보인다") 배지를 붙인다.
@@ -816,6 +1113,8 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         }
         var slotCount = SelectedRecipe.Slots.Count;
         _main.RecipeBuilder.LoadRecipe(SelectedRecipe);
+        _main.MarkRecipesUsed(new[] { SelectedRecipe.Id });
+        _main.ShowEditTab();
         _main.Status = $"레시피 '{SelectedRecipe.Name}' 불러옴 ({slotCount}개 슬롯)";
     }
 

@@ -29,6 +29,12 @@ public sealed partial class SelectableRecipeItem : ObservableObject
     /// 바꾸지 않고 별도 플래그로 뺐다.</summary>
     public bool IsPreview => Recipe.Labels.Contains("프리뷰");
     [ObservableProperty] private bool _isChecked;
+    /// <summary>이 레시피만 따로 정한 줄 수(빈 칸 = 생성 탭의 '줄 수'). 숫자로 안 읽히거나 0 이하면 따로 정하지 않은 것으로 본다.</summary>
+    [ObservableProperty] private string _lineCountText = "";
+    public int? LineCountOverride => int.TryParse(LineCountText.Trim(), out var n) && n > 0 ? n : null;
+    /// <summary>줄 수 칸이 비었는가(비었으면 기본값을 회색으로 겹쳐 보여 준다).</summary>
+    public bool IsLineCountEmpty => string.IsNullOrWhiteSpace(LineCountText);
+    partial void OnLineCountTextChanged(string value) => OnPropertyChanged(nameof(IsLineCountEmpty));
 
     /// <summary>이름 + Labels + 모든 슬롯/그룹 라벨 + 모든 danbooru 태그를 한 문자열로 모은
     /// 검색용 블롭. "netorare"/"네토라레"를 검색창에 치면 사용자가 따로 라벨을 안 붙였어도
@@ -112,13 +118,323 @@ public sealed partial class GenerationViewModel : ObservableObject
     [ObservableProperty] private string _conflictReport = "";
     /// <summary>백그라운드 생성 진행률("1,200/22,700줄 (5%)"). 비어 있으면 진행 중이 아니다.</summary>
     [ObservableProperty] private string _progressText = "";
-    /// <summary>방금 뽑은 줄들의 길이 요약(guide.md 줄 길이 예산 24~27태그 점검용).</summary>
-    [ObservableProperty] private string _lineStatsText = "";
     /// <summary>일괄 생성 결과를 한 파일로 잇지 않고 레시피마다 따로 쓴다(출력 경로의 폴더에
     /// "레시피 이름.txt"). ComfyUI에서 컨셉별로 __와일드카드__를 부르려면 팩당 파일이 필요하다.</summary>
     [ObservableProperty] private bool _splitFilesPerRecipe;
+    /// <summary>출력 프로필(모델별 출력 설정 묶음). 고르면 품질 태그·'_'→공백·빈 줄·자동 정렬을 한 번에 바꾼다.</summary>
+    public ObservableCollection<OutputProfile> OutputProfiles { get; } = new();
+    [ObservableProperty] private OutputProfile? _selectedOutputProfile;
+    [ObservableProperty] private string _outputProfileName = "";
+
+    /// <summary>시작할 때 지난번 고른 프로필을 콤보에만 다시 띄운다(값은 지난번 설정 그대로 — 프로필 값으로 덮지 않는다).</summary>
+    private bool _restoringProfile;
+
+    partial void OnSelectedOutputProfileChanged(OutputProfile? value)
+    {
+        if (value is null || _restoringProfile) return;
+        QualityTagsEnabled = value.QualityTagsEnabled;
+        QualityTagsText = value.QualityTagsText;
+        UnderscoreToSpace = value.UnderscoreToSpace;
+        InsertBlankLine = value.InsertBlankLine;
+        AutoOrderTags = value.AutoOrderTags;
+        OutputProfileName = value.Name;
+        ProfileModel = value.Model;
+        ProfileTokenLimitText = value.TokenLimit > 0 ? value.TokenLimit.ToString() : "";
+        RefreshPreviewPanel();   // 모델·기준이 바뀌면 미리보기의 토큰 수·주황 표시도 바뀐다
+        _main.Status = $"출력 프로필 '{value.Name}' 적용";
+    }
+
+    // ── 생성 카드(두 탭 공통) ─────────────────────────────────────────────
+
+    /// <summary>미리보기 줄 수: 일괄(레시피 여러 개)은 레시피마다 3줄, 레시피 하나·편집 탭은 10줄 — "몇 줄 확인" 용도.</summary>
+    public const int PreviewLinesPerRecipe = 3;
+    public const int PreviewLinesSingle = 10;
+
+    /// <summary>카드 머리: 무엇을 생성하는지("대상: 체크한 레시피 12개" / "대상: 레시피 빌더의 지금 구성").</summary>
+    [ObservableProperty] private string _targetText = "";
+    /// <summary>생성 뒤 요약 한 줄("✓ 12개 레시피 2,350줄 → nsfw.txt · 덮어쓰기 · 시드 …").</summary>
+    [ObservableProperty] private string _resultSummaryText = "";
+    /// <summary>미리보기 칸(레시피마다 몇 줄, 한 줄로 잘라 보여 주고 토큰 수).</summary>
+    public ObservableCollection<PreviewLine> PreviewLines { get; } = new();
+    /// <summary>"Anima 토큰 평균 241 · 최대 425 · 기준 512 넘는 줄 0/36". 실제 토크나이저가 없으면 "(추정)".</summary>
+    [ObservableProperty] private string _tokenSummaryText = "";
+    /// <summary>고급 설정 머리줄(기본값과 다른 항목 요약).</summary>
+    [ObservableProperty] private string _advancedSummaryText = "고급 설정";
+    /// <summary>생성할 때마다 결과 창을 자동으로 연다(기본 끔 — 매번 뜨면 번거롭다).</summary>
+    [ObservableProperty] private bool _autoOpenResults;
+    /// <summary>프로필 저장용: 모델(IL/Anima)과 토큰 기준(빈 칸 = 모델 기본값).</summary>
+    [ObservableProperty] private Core.Tokenization.ModelKind _profileModel = Core.Tokenization.ModelKind.IL;
+    [ObservableProperty] private string _profileTokenLimitText = "";
+    public Core.Tokenization.ModelKind[] ModelKinds { get; } = { Core.Tokenization.ModelKind.IL, Core.Tokenization.ModelKind.Anima };
+
+    // 카드의 '토큰 기준'이 곧 지금 적용되는 값 — 바꾸면 미리보기 토큰 수·주황 표시도 바로 바뀐다.
+    partial void OnProfileModelChanged(Core.Tokenization.ModelKind value) => RefreshPreviewPanel();
+    partial void OnProfileTokenLimitTextChanged(string value) => RefreshPreviewPanel();
+
+    /// <summary>쓰기 방식 라디오(덮어쓰기/이어쓰기/새 파일) ↔ <see cref="Mode"/>.</summary>
+    public bool IsOverwrite { get => Mode == WriteMode.Overwrite; set { if (value) Mode = WriteMode.Overwrite; } }
+    public bool IsAppend { get => Mode == WriteMode.Append; set { if (value) Mode = WriteMode.Append; } }
+    public bool IsNew { get => Mode == WriteMode.New; set { if (value) Mode = WriteMode.New; } }
+
+    partial void OnModeChanged(WriteMode value)
+    {
+        OnPropertyChanged(nameof(IsOverwrite));
+        OnPropertyChanged(nameof(IsAppend));
+        OnPropertyChanged(nameof(IsNew));
+    }
+
+    partial void OnIsMultiRecipeModeChanged(bool value)
+    {
+        if (_main.SelectedTabIndex != (value ? 0 : 1)) _main.SelectedTabIndex = value ? 0 : 1;
+        RefreshCheckedCount();
+    }
+
+    private static string ModeText(WriteMode m) => m switch
+    {
+        WriteMode.Overwrite => "덮어쓰기",
+        WriteMode.Append => "이어쓰기",
+        _ => "새 파일",
+    };
+
+    /// <summary>고급 설정 머리줄에 요약할 속성들(바뀌면 다시 요약).</summary>
+    private static readonly HashSet<string> AdvancedProps = new()
+    {
+        nameof(SeedText), nameof(DedupeWithinLine), nameof(AvoidDuplicateLines), nameof(StopWhenExhausted), nameof(AvoidConflicts),
+        nameof(LocalConflictFiltering), nameof(UnderscoreToSpace), nameof(WeightedSampling), nameof(AutoOrderTags),
+        nameof(InsertBlankLine), nameof(QualityTagsEnabled), nameof(AutoOpenResults),
+    };
+
+    private void RefreshAdvancedSummary()
+    {
+        var d = new List<string>();
+        if (SeedText.Trim() is { Length: > 0 } s && s != "-1") d.Add($"시드 {s}");
+        if (!DedupeWithinLine) d.Add("줄 내 중복 제거 끔");
+        if (!AvoidDuplicateLines) d.Add("줄 중복 회피 끔");
+        else if (!StopWhenExhausted) d.Add("바닥나면 멈춤 끔");
+        if (!AvoidConflicts) d.Add("모순 회피 끔");
+        else if (LocalConflictFiltering) d.Add("슬롯 단위 걸러내기");
+        if (!UnderscoreToSpace) d.Add("_ 그대로");
+        if (WeightedSampling) d.Add("빈도 가중");
+        if (AutoOrderTags) d.Add("자동 정렬");
+        if (!InsertBlankLine) d.Add("빈 줄 안 띄움");
+        if (QualityTagsEnabled) d.Add("품질 태그 켬");
+        if (AutoOpenResults) d.Add("결과 창 자동");
+        AdvancedSummaryText = d.Count == 0 ? "고급 설정" : $"고급 설정 (기본과 다름: {string.Join(" · ", d.Take(4))}{(d.Count > 4 ? $" 외 {d.Count - 4}" : "")})";
+    }
+
+    private Views.ResultsWindow? _resultsWindow;
+
+    /// <summary>결과 크게 보기: 줄 확인·📌 잠금·결과 검색·줄 출처. 버튼으로만 연다(설정으로 자동 열기 가능).</summary>
+    [RelayCommand]
+    private void OpenResults()
+    {
+        if (_resultsWindow != null) { _resultsWindow.Activate(); return; }
+        var win = new Views.ResultsWindow { DataContext = this, Owner = System.Windows.Application.Current.MainWindow };
+        _resultsWindow = win;
+        win.Closed += (_, _) => _resultsWindow = null;
+        win.Show();
+    }
+
+    private void AutoOpenResultsIfWanted()
+    {
+        if (AutoOpenResults && _resultsWindow == null) OpenResults();
+    }
+
+    /// <summary>마지막으로 띄운 결과(미리보기 칸을 다시 그릴 때 — 프로필·품질 태그가 바뀌면 토큰 수가 달라진다).</summary>
+    private IReadOnlyList<RecipeOutput> _lastOutputs = Array.Empty<RecipeOutput>();
+
+    /// <summary>미리보기 칸과 토큰 요약을 지금 프로필 기준으로 다시 그린다.</summary>
+    private void RefreshPreviewPanel()
+    {
+        PreviewLines.Clear();
+        if (_lastOutputs.Count == 0) { TokenSummaryText = ""; return; }
+        var (counter, limit) = CurrentTokenRule();
+        bool multi = _lastOutputs.Count > 1;
+        int perRecipe = multi ? PreviewLinesPerRecipe : PreviewLinesSingle;
+        var allDisplay = new List<string>();
+        foreach (var o in _lastOutputs)
+        {
+            var display = ApplyQualityTags(o.Result).Lines;
+            allDisplay.AddRange(display);
+            if (multi) PreviewLines.Add(new PreviewLine(o.Recipe.Name, "", "", 0, false));
+            foreach (var line in display.Take(perRecipe))
+            {
+                int t = Core.Tokenization.TokenCounters.CountLine(counter, line);
+                PreviewLines.Add(new PreviewLine("", line, line, t, t > limit));
+            }
+        }
+        var len = Core.Output.LineStats.Measure(allDisplay, counter, limit);
+        TokenSummaryText = len.LineCount == 0 ? "" :
+            $"{len.Model} 토큰 평균 {len.TokensAverage:0.#} · 최대 {len.TokensMax}"
+            + (len.Model == Core.Tokenization.ModelKind.IL ? $"({len.ChunksMax}청크)" : "")
+            + $" · 기준 {len.TokenLimit} 넘는 줄 {len.OverLimit}/{len.LineCount}"
+            + (len.IsExact ? "" : " (추정)");
+    }
+
+    /// <summary>지금 출력 설정을 이름칸의 이름으로 저장한다(같은 이름이면 덮어씀).</summary>
+    [RelayCommand]
+    private void SaveOutputProfile()
+    {
+        var name = OutputProfileName.Trim();
+        if (name.Length == 0) { _main.Status = "출력 프로필 이름을 입력하세요."; return; }
+        var profile = OutputProfiles.FirstOrDefault(p => p.Name == name);
+        if (profile is null) { profile = new OutputProfile { Name = name }; OutputProfiles.Add(profile); }
+        profile.QualityTagsEnabled = QualityTagsEnabled;
+        profile.QualityTagsText = QualityTagsText;
+        profile.UnderscoreToSpace = UnderscoreToSpace;
+        profile.InsertBlankLine = InsertBlankLine;
+        profile.AutoOrderTags = AutoOrderTags;
+        profile.Model = ProfileModel;
+        profile.TokenLimit = ParsedTokenLimit();
+        _main.Settings.OutputProfiles = OutputProfiles.ToList();
+        // 저장한 프로필을 고른 상태로(같은 값이라 다시 적용해도 그대로) — 다음 실행에도 이 프로필로 시작한다.
+        SelectedOutputProfile = profile;
+        SaveSettings();
+        _main.Status = $"출력 프로필 '{name}' 저장됨 · {ProfileModel} 기준 {CurrentTokenRule().Limit}";
+    }
+
+    [RelayCommand]
+    private void DeleteOutputProfile()
+    {
+        if (SelectedOutputProfile is not { } p) { _main.Status = "지울 출력 프로필을 고르세요."; return; }
+        OutputProfiles.Remove(p);
+        SelectedOutputProfile = null;
+        _main.Settings.OutputProfiles = OutputProfiles.ToList();
+        SettingsStore.Save(_main.Settings);
+        _main.Status = $"출력 프로필 '{p.Name}' 삭제됨";
+    }
+
+    /// <summary>서로 다른 줄이 바닥나면 요청 줄 수를 못 채워도 멈춘다(GenerationOptions.StopWhenExhausted).</summary>
+    [ObservableProperty] private bool _stopWhenExhausted = true;
+
+    /// <summary>방금 뽑은 줄 목록(미리보기·생성 둘 다). 줄마다 📌 잠금과 출처(<see cref="ResultLineItem.Origin"/>)를 단다.
+    /// 통째로 갈아 끼운다 — 줄을 하나씩 Add하면 일괄 생성 수천 줄에서 목록 갱신 알림만 수천 번 난다.</summary>
+    [ObservableProperty] private ObservableCollection<ResultLineItem> _resultLines = new();
+    /// <summary>뽑은 줄 전부(<see cref="ResultLines"/>는 결과 검색으로 걸러진 표시용). 잠금·복사·다시 뽑기는 늘 이쪽 기준이다 —
+    /// 검색으로 가려진 잠근 줄이 다음 생성에서 빠지면 안 된다.</summary>
+    private List<ResultLineItem> _allResults = new();
+    /// <summary>결과 검색어: 공백으로 나눈 낱말이 전부 들어간 줄만(밑줄·공백 구분 없음, 대소문자 무시). "-낱말"은 그 낱말이 없는 줄.</summary>
+    [ObservableProperty] private string _resultFilterText = "";
+    /// <summary>"200줄" / 검색 중이면 "12/200줄 · 75토큰 넘는 줄 3".</summary>
+    [ObservableProperty] private string _resultCountText = "";
+    [ObservableProperty] private ResultLineItem? _selectedResultLine;
+    /// <summary>선택한 줄의 출처(슬롯마다 무엇이 나왔는지·무엇이 걸러졌는지). 선택이 없으면 빈 문자열.</summary>
+    [ObservableProperty] private string _selectedOriginText = "";
+    /// <summary>"📌 3줄 잠김". 잠근 줄이 없으면 빈 문자열(잠금 해제 버튼도 숨는다).</summary>
+    [ObservableProperty] private string _lockedCountText = "";
 
     public WriteMode[] Modes { get; } = { WriteMode.New, WriteMode.Overwrite, WriteMode.Append };
+
+    partial void OnSelectedResultLineChanged(ResultLineItem? value) =>
+        SelectedOriginText = value is null ? "" : BuildOriginText(value);
+
+    private static string BuildOriginText(ResultLineItem item)
+    {
+        var header = $"#{item.Number} · {item.RecipeName}"
+            + (item.Origin is { Retries: > 0 } o ? $" · 줄 전체 재추첨 {o.Retries}회" : "")
+            + (item.IsLocked ? " · 📌 잠김" : "");
+        return item.Origin is null
+            ? header
+            : header + "\n" + LineOriginText.Format(item.Origin, item.Hits);
+    }
+
+    partial void OnResultFilterTextChanged(string value) => ApplyResultFilter();
+
+    private static string NormalizeForSearch(string s) => s.Replace('_', ' ').ToLowerInvariant();
+
+    private void ApplyResultFilter()
+    {
+        var terms = ResultFilterText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(NormalizeForSearch).ToList();
+        var include = terms.Where(t => !t.StartsWith('-')).ToList();
+        var exclude = terms.Where(t => t.StartsWith('-') && t.Length > 1).Select(t => t[1..]).ToList();
+        var shown = terms.Count == 0
+            ? _allResults
+            : _allResults.Where(r =>
+            {
+                var text = NormalizeForSearch(r.DisplayText);
+                return include.All(t => text.Contains(t, StringComparison.Ordinal)) && !exclude.Any(t => text.Contains(t, StringComparison.Ordinal));
+            }).ToList();
+        var keep = SelectedResultLine;
+        ResultLines = new ObservableCollection<ResultLineItem>(shown);
+        SelectedResultLine = keep != null && shown.Contains(keep) ? keep : null;
+        int over = shown.Count(r => r.IsOverLimit);
+        ResultCountText = _allResults.Count == 0 ? ""
+            : (terms.Count == 0 ? $"{_allResults.Count:N0}줄" : $"{shown.Count:N0}/{_allResults.Count:N0}줄")
+              + (over > 0 ? $" · 토큰 기준 넘는 줄 {over:N0}" : "");
+    }
+
+    private void RefreshLockedCount()
+    {
+        int n = _allResults.Count(r => r.IsLocked);
+        LockedCountText = n == 0 ? "" : $"📌 {n}줄 잠김";
+        if (SelectedResultLine is { } s) SelectedOriginText = BuildOriginText(s);
+    }
+
+    [RelayCommand]
+    private void UnlockAll()
+    {
+        foreach (var r in _allResults) r.IsLocked = false;
+    }
+
+    /// <summary>선택한 줄 하나만 클립보드로(품질 태그 붙은 그대로).</summary>
+    [RelayCommand]
+    private void CopySelectedLine()
+    {
+        if (SelectedResultLine is not { } line) { _main.Status = "복사할 줄을 먼저 고르세요."; return; }
+        try
+        {
+            System.Windows.Clipboard.SetText(line.DisplayText);
+            _main.Status = $"{line.Number}번째 줄을 클립보드에 복사했습니다.";
+        }
+        catch (System.Runtime.InteropServices.ExternalException)
+        {
+            _main.Status = "클립보드를 다른 프로그램이 쓰고 있어 복사하지 못했습니다. 잠시 후 다시 시도하세요.";
+        }
+    }
+
+    /// <summary>결과 목록을 새로 채운다. 레시피마다 잠근 줄이 앞에 오고(<see cref="RecipeOutput.LockedCount"/>) 새 줄이 뒤에 온다.</summary>
+    private void ShowResults(IReadOnlyList<RecipeOutput> outputs)
+    {
+        var (counter, limit) = CurrentTokenRule();
+        var items = new List<ResultLineItem>();
+        bool multi = outputs.Count > 1;
+        foreach (var o in outputs)
+        {
+            var display = ApplyQualityTags(o.Result).Lines;
+            int lineTokens;
+            var hits = new Dictionary<int, IReadOnlyList<ConflictHit>>();
+            foreach (var c in o.Result.Conflicts) hits[c.LineIndex] = c.Hits;
+            for (int j = 0; j < o.Result.Lines.Count; j++)
+            {
+                var item = new ResultLineItem(
+                    items.Count + 1, o.LockKey, o.Recipe.Name,
+                    multi && j == 0 ? $"── {o.Recipe.Name} ──" : "",
+                    o.Result.Lines[j], display[j],
+                    j < o.Result.LineKeys.Count ? o.Result.LineKeys[j] : "",
+                    o.Result.Origins is { } origins && j < origins.Count ? origins[j] : null,
+                    hits.GetValueOrDefault(j) ?? Array.Empty<ConflictHit>(),
+                    isLocked: j < o.LockedCount,
+                    tokens: lineTokens = Core.Tokenization.TokenCounters.CountLine(counter, display[j]),
+                    overLimit: lineTokens > limit);
+                item.PropertyChanged += (_, e) =>
+                {
+                    if (e.PropertyName == nameof(ResultLineItem.IsLocked)) RefreshLockedCount();
+                };
+                items.Add(item);
+            }
+        }
+        _allResults = items;
+        SelectedResultLine = null;
+        ApplyResultFilter();
+        _lastOutputs = outputs;
+        RefreshPreviewPanel();
+        PreviewText = string.Join("\n", items.Select(i => i.DisplayText));
+        RefreshLockedCount();
+    }
+
+    /// <summary>잠금 기준 키. 단일 생성은 빌더에 불러온 레시피(바꿔 불러오면 다른 키라 이전 레시피의 잠근 줄이 안 섞인다).</summary>
+    private string BuilderLockKey() => "builder:" + (_main.RecipeBuilder.LoadedRecipeId ?? "");
 
     public GenerationViewModel(MainViewModel main)
     {
@@ -128,6 +444,15 @@ public sealed partial class GenerationViewModel : ObservableObject
         RefreshBatchItems();
         RefreshBatchPresets();
         RefreshHookSummary();
+        RefreshAdvancedSummary();
+        PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName is null) return;
+            if (AdvancedProps.Contains(e.PropertyName)) RefreshAdvancedSummary();
+            // 품질 태그를 켜고 끄면 실제 출력 줄 길이가 달라진다(글자 하나 칠 때마다 다시 세지는 않는다).
+            if (e.PropertyName == nameof(QualityTagsEnabled)) RefreshPreviewPanel();
+            if (e.PropertyName == nameof(LineCount)) RefreshCheckedCount();
+        };
     }
 
     partial void OnBatchSearchTextChanged(string value) => RefreshBatchItems();
@@ -167,24 +492,55 @@ public sealed partial class GenerationViewModel : ObservableObject
     private SelectableRecipeItem CreateBatchItem(Recipe recipe)
     {
         var item = new SelectableRecipeItem(recipe);
+        if (_main.Settings.BatchLineCounts.TryGetValue(recipe.Id, out var saved)) item.LineCountText = saved.ToString();
         item.PropertyChanged += (_, e) =>
         {
             if (e.PropertyName == nameof(SelectableRecipeItem.IsChecked)) RefreshCheckedCount();
+            else if (e.PropertyName == nameof(SelectableRecipeItem.LineCountText))
+            {
+                // 설정은 앱을 닫을 때(SaveSettings) 디스크에 쓴다.
+                if (item.LineCountOverride is { } n) _main.Settings.BatchLineCounts[recipe.Id] = n;
+                else _main.Settings.BatchLineCounts.Remove(recipe.Id);
+                RefreshCheckedCount();
+            }
         };
         return item;
     }
 
+    /// <summary>체크 수·예상 줄 수(레시피별 줄 수 반영)·검색에 가려진 체크, 그리고 생성 카드의 대상 문구를 다시 쓴다.</summary>
     private void RefreshCheckedCount()
     {
-        int total = _allBatchItems.Count(b => b.IsChecked);
-        int visible = BatchItems.Count(b => b.IsChecked);
-        int hidden = total - visible;
+        var checkedItems = _allBatchItems.Where(b => b.IsChecked).ToList();
+        int total = checkedItems.Count;
+        int hidden = total - BatchItems.Count(b => b.IsChecked);
+        long expected = checkedItems.Sum(b => (long)(b.LineCountOverride ?? LineCount));
         CheckedCountText = total == 0
             ? "체크 없음"
-            : hidden > 0 ? $"체크 {total}개 (검색에 가려진 {hidden}개 포함)" : $"체크 {total}개";
+            : $"체크 {total}개 · 예상 {expected:N0}줄" + (hidden > 0 ? $" (검색·보기에 가려진 체크 {hidden}개 포함)" : "");
+        TargetText = IsMultiRecipeMode
+            ? (total == 0 ? "대상: 체크한 레시피 없음 — 왼쪽 목록에서 고르세요" : $"대상: 체크한 레시피 {total}개")
+            : "대상: 레시피 빌더의 지금 구성";
+        ChangedFilterText = $"🆕 새로·바뀜 {_allBatchItems.Count(b => _main.ChangeBadgeOf(b.Recipe.Id).Length > 0)}";
     }
 
-    /// <summary>검색어에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
+    /// <summary>일괄 목록 보기: 0 전체 · 1 일반 · 2 🔞 성인 · 3 🆕 새로·바뀜. 보기는 "무엇을 보여 줄지"만 정한다 — 생성은 체크된 전부.</summary>
+    [ObservableProperty] private int _batchFilter;
+    [ObservableProperty] private string _changedFilterText = "🆕 새로·바뀜";
+    public bool FilterAll { get => BatchFilter == 0; set { if (value) BatchFilter = 0; } }
+    public bool FilterSfw { get => BatchFilter == 1; set { if (value) BatchFilter = 1; } }
+    public bool FilterNsfw { get => BatchFilter == 2; set { if (value) BatchFilter = 2; } }
+    public bool FilterChanged { get => BatchFilter == 3; set { if (value) BatchFilter = 3; } }
+
+    partial void OnBatchFilterChanged(int value)
+    {
+        OnPropertyChanged(nameof(FilterAll));
+        OnPropertyChanged(nameof(FilterSfw));
+        OnPropertyChanged(nameof(FilterNsfw));
+        OnPropertyChanged(nameof(FilterChanged));
+        RefreshBatchItems();
+    }
+
+    /// <summary>검색어와 보기에 맞는 항목만 BatchItems에 다시 채운다. 이름뿐 아니라 SearchBlob(태그·
     /// 축 라벨·Labels)까지 훑으므로 "netorare" 같은 실제 태그명으로도 걸린다. _allBatchItems가
     /// 마스터라 체크 상태는 SelectableRecipeItem 인스턴스가 그대로 재사용되면서 유지된다.</summary>
     private void RefreshBatchItems()
@@ -192,17 +548,27 @@ public sealed partial class GenerationViewModel : ObservableObject
         BatchItems.Clear();
         var search = BatchSearchText.Trim();
         foreach (var item in _allBatchItems)
-            if (string.IsNullOrWhiteSpace(search) || item.SearchBlob.Contains(search, StringComparison.OrdinalIgnoreCase))
-                BatchItems.Add(item);
-        // 가려진 개수는 검색어에 따라 달라지므로 목록을 다시 채울 때마다 계산한다.
+        {
+            if (!string.IsNullOrWhiteSpace(search) && !item.SearchBlob.Contains(search, StringComparison.OrdinalIgnoreCase)) continue;
+            bool show = BatchFilter switch
+            {
+                1 => !item.IsNsfw,
+                2 => item.IsNsfw,
+                3 => _main.ChangeBadgeOf(item.Recipe.Id).Length > 0,
+                _ => true,
+            };
+            if (show) BatchItems.Add(item);
+        }
+        // 가려진 개수는 검색어·보기에 따라 달라지므로 목록을 다시 채울 때마다 계산한다.
         RefreshCheckedCount();
     }
 
-    /// <summary>현재 검색으로 걸러진 목록만 일괄 체크/해제한다(검색으로 가려진 항목은 안 건드림).</summary>
+    /// <summary>지금 보이는 것만 체크한다(검색·보기로 가려진 항목은 안 건드림). 일반/성인 보기에선 "프리뷰" 라벨 팩
+    /// (포즈 레퍼런스 샷)은 빼고 체크한다 — 예전 "🔞 전체"/"SFW 전체" 버튼과 같은 규칙.</summary>
     [RelayCommand]
     private void SelectAllBatchItems()
     {
-        foreach (var item in BatchItems) item.IsChecked = true;
+        foreach (var item in BatchItems) item.IsChecked = BatchFilter is 1 or 2 ? !item.IsPreview : true;
     }
 
     [RelayCommand]
@@ -211,27 +577,11 @@ public sealed partial class GenerationViewModel : ObservableObject
         foreach (var item in BatchItems) item.IsChecked = false;
     }
 
-    /// <summary>NSFW(🔞)만 일괄 체크. 기존 체크는 유지하지 않고 이 그룹만 남긴다 —
-    /// "NSFW 전체 돌려보기"가 주 용도라 매번 해제부터 누르지 않아도 되게.
-    /// 검색 필터가 걸려 있으면 그 안에서만 동작한다(전체 선택 버튼과 같은 규칙).</summary>
-    [RelayCommand]
-    private void SelectNsfwBatchItems() => SelectByRating(nsfw: true);
-
-    /// <summary>SFW(🔞 아님)만 일괄 체크.</summary>
-    [RelayCommand]
-    private void SelectSfwBatchItems() => SelectByRating(nsfw: false);
-
-    private void SelectByRating(bool nsfw)
-    {
-        foreach (var item in BatchItems)
-            item.IsChecked = !item.IsPreview && item.IsNsfw == nsfw;
-    }
-
     /// <summary>훅 창에서 변경이 있을 때 HookLibraryViewModel이 호출한다.</summary>
     public void RefreshHookSummary()
     {
         int on = _main.Hooks.Count(h => h.IsEnabled);
-        HookSummaryText = on == 0 ? "훅 없음" : $"🔗 훅 {on}개 적용 중";
+        HookSummaryText = on == 0 ? "" : $"🔗 훅 {on}개 적용 중 — 생성할 때 레시피에 끼워 넣습니다";
     }
 
     private void RefreshBatchPresets()
@@ -366,6 +716,17 @@ public sealed partial class GenerationViewModel : ObservableObject
         _main.Status = $"프리셋 '{name}' 저장됨 — {entries.Count}개.";
     }
 
+    /// <summary>[저장 ▾] → "지금 체크로 새로 저장…": 이름을 묻고 새 프리셋으로 저장한다(같은 이름이면 덮어쓸지 묻는다).</summary>
+    [RelayCommand]
+    private void SaveBatchPresetAs()
+    {
+        var name = Views.NamePromptWindow.Ask("선택 프리셋 저장", "지금 체크된 레시피를 이 이름으로 저장합니다:",
+            SelectedBatchPreset?.Name ?? "");
+        if (name is null) return;
+        BatchPresetNameInput = name;
+        SaveBatchPreset();
+    }
+
     [RelayCommand]
     private void DeleteBatchPreset()
     {
@@ -405,6 +766,17 @@ public sealed partial class GenerationViewModel : ObservableObject
         QualityTagsEnabled = s.QualityTagsEnabled;
         QualityTagsText = s.QualityTagsText;
         SplitFilesPerRecipe = s.SplitFilesPerRecipe;
+        StopWhenExhausted = s.StopWhenExhausted;
+        AutoOpenResults = s.AutoOpenResults;
+        foreach (var p in s.OutputProfiles) OutputProfiles.Add(p);
+        ProfileModel = s.OutputModel;
+        ProfileTokenLimitText = s.OutputTokenLimit > 0 ? s.OutputTokenLimit.ToString() : "";
+        if (OutputProfiles.FirstOrDefault(p => p.Name == s.LastOutputProfileName) is { } last)
+        {
+            _restoringProfile = true;
+            try { SelectedOutputProfile = last; OutputProfileName = last.Name; }
+            finally { _restoringProfile = false; }
+        }
     }
 
     /// <summary>현재 생성 탭 설정을 Settings에 담아 디스크에 저장한다.
@@ -426,6 +798,11 @@ public sealed partial class GenerationViewModel : ObservableObject
         s.QualityTagsEnabled = QualityTagsEnabled;
         s.QualityTagsText = QualityTagsText;
         s.SplitFilesPerRecipe = SplitFilesPerRecipe;
+        s.StopWhenExhausted = StopWhenExhausted;
+        s.AutoOpenResults = AutoOpenResults;
+        s.OutputModel = ProfileModel;
+        s.OutputTokenLimit = ParsedTokenLimit();
+        s.LastOutputProfileName = SelectedOutputProfile?.Name ?? "";
         SettingsStore.Save(s);
     }
 
@@ -441,7 +818,17 @@ public sealed partial class GenerationViewModel : ObservableObject
         UnderscoreToSpace = UnderscoreToSpace,
         Sampling = WeightedSampling ? SamplingMode.Weighted : SamplingMode.Uniform,
         AutoOrderTags = AutoOrderTags,
+        StopWhenExhausted = StopWhenExhausted,
     };
+
+    /// <summary>생성 탭 설정 그대로의 옵션(실시간 지표·레시피 비교용). 시드가 자동이면 12345로 고정한다 —
+    /// 고칠 때마다 지표가 난수 때문에 흔들리면 "고친 효과"와 "운"을 구분할 수 없다.</summary>
+    public GenerationOptions SnapshotOptions()
+    {
+        var o = BuildOptions();
+        o.Seed ??= 12345;
+        return o;
+    }
 
     /// <summary>이번 호출에 실제로 쓰인 시드. 자동(랜덤) 시드일 때도 결과에 남겨 사용자가
     /// "정말 매번 다른 시드로 도는지" 눈으로 확인할 수 있게 한다.</summary>
@@ -454,8 +841,32 @@ public sealed partial class GenerationViewModel : ObservableObject
         IReadOnlyList<Recipe> Recipes,
         IReadOnlyDictionary<string, Pool> Pools,
         GenerationOptions Options,
-        int LineCountEach,
-        int Seed);
+        IReadOnlyList<int> LineCounts,
+        int Seed,
+        IReadOnlyList<string> LockKeys,
+        IReadOnlyList<IReadOnlyList<LockedLine>> Locked,
+        int DroppedLocks);
+
+    /// <summary>잠근 줄의 스냅샷(백그라운드로 넘기므로 뷰모델 객체 대신 값만).</summary>
+    private sealed record LockedLine(string RawText, string LineKey, LineOrigin? Origin, IReadOnlyList<ConflictHit> Hits);
+
+    /// <summary>잠근 줄 + 새로 뽑은 줄을 한 결과로. 잠근 줄의 모순은 그 줄이 처음 나왔을 때의 기록을 그대로 쓴다.</summary>
+    private static GenerationResult Compose(IReadOnlyList<LockedLine> locked, GenerationResult fresh)
+    {
+        if (locked.Count == 0) return fresh;
+        var conflicts = new List<LineConflict>();
+        for (int i = 0; i < locked.Count; i++)
+            if (locked[i].Hits.Count > 0) conflicts.Add(new LineConflict(i, locked[i].Hits));
+        conflicts.AddRange(fresh.Conflicts.Select(c => c with { LineIndex = c.LineIndex + locked.Count }));
+        var empty = new LineOrigin(Array.Empty<SlotOrigin>(), 0);
+        return fresh with
+        {
+            Lines = locked.Select(l => l.RawText).Concat(fresh.Lines).ToList(),
+            LineKeys = locked.Select(l => l.LineKey).Concat(fresh.LineKeys).ToList(),
+            Origins = fresh.Origins is null ? null : locked.Select(l => l.Origin ?? empty).Concat(fresh.Origins).ToList(),
+            Conflicts = conflicts,
+        };
+    }
 
     private static Recipe Clone(Recipe recipe) =>
         System.Text.Json.JsonSerializer.Deserialize<Recipe>(
@@ -467,19 +878,32 @@ public sealed partial class GenerationViewModel : ObservableObject
 
     /// <summary>UI 스레드에서만 할 수 있는 일(슬롯·체크 상태·풀 읽기, 시드 확정)을 먼저 끝내
     /// 백그라운드가 건드릴 게 없는 스냅샷으로 만든다.</summary>
-    private GenerationJob BuildJob(int lineCountEach)
+    /// <param name="preview">미리보기면 레시피마다 최대 20줄.</param>
+    private GenerationJob BuildJob(bool preview)
     {
         var opts = BuildOptions();
         // 시드를 비워뒀으면(자동) 여기서 직접 하나 뽑아 못박는다 — SystemRandomSource에 null을
         // 넘기면 내부에서 알아서 뽑긴 하지만 그 값을 밖에서 확인할 방법이 없어진다.
         _lastSeedUsed = opts.Seed ?? Random.Shared.Next();
-        var recipes = IsMultiRecipeMode
-            // 마스터 목록을 읽는다. BatchItems는 검색어로 걸러진 표시용이라, 레시피를 체크해 둔 뒤
-            // 검색창에 무언가를 입력하면 가려진 항목이 조용히 생성에서 빠졌다(성공으로 끝나므로
-            // 눈치채기도 어려웠다). 검색은 "무엇을 보여줄지"만 정해야지 "무엇을 생성할지"를
-            // 정해서는 안 된다.
-            ? _allBatchItems.Where(b => b.IsChecked).Select(b => Clone(b.Recipe)).ToList()
-            : new List<Recipe> { Clone(_main.RecipeBuilder.BuildRecipe()) };
+        // 마스터 목록을 읽는다. BatchItems는 검색어로 걸러진 표시용이라, 레시피를 체크해 둔 뒤
+        // 검색창에 무언가를 입력하면 가려진 항목이 조용히 생성에서 빠졌다(성공으로 끝나므로
+        // 눈치채기도 어려웠다). 검색은 "무엇을 보여줄지"만 정해야지 "무엇을 생성할지"를
+        // 정해서는 안 된다.
+        var sources = IsMultiRecipeMode
+            ? _allBatchItems.Where(b => b.IsChecked).Select(b => (Recipe: b.Recipe, Key: b.Recipe.Id, Lines: b.LineCountOverride ?? LineCount)).ToList()
+            : new List<(Recipe Recipe, string Key, int Lines)> { (_main.RecipeBuilder.BuildRecipe(), BuilderLockKey(), LineCount) };
+        // 미리보기는 "몇 줄 확인"용: 레시피 여러 개면 레시피마다 3줄, 하나면 10줄.
+        int previewEach = sources.Count > 1 ? PreviewLinesPerRecipe : PreviewLinesSingle;
+        var lineCounts = sources.Select(s => preview ? Math.Min(previewEach, s.Lines) : s.Lines).ToList();
+        var recipes = sources.Select(s => Clone(s.Recipe)).ToList();
+        var lockKeys = sources.Select(s => s.Key).ToList();
+
+        // 잠근 줄: 같은 키의 레시피를 다시 뽑을 때만 남는다. 이번 대상이 아닌 레시피의 잠근 줄은 목록에서 빠진다(알림).
+        var lockedByKey = _allResults.Where(r => r.IsLocked)
+            .GroupBy(r => r.LockKey, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<LockedLine>)g.Select(r => new LockedLine(r.RawText, r.LineKey, r.Origin, r.Hits)).ToList(), StringComparer.Ordinal);
+        var locked = lockKeys.Select(k => lockedByKey.GetValueOrDefault(k) ?? Array.Empty<LockedLine>()).ToList();
+        int droppedLocks = lockedByKey.Where(kv => !lockKeys.Contains(kv.Key)).Sum(kv => kv.Value.Count);
 
         var pools = _main.Pools.ToDictionary(p => p.Id);
 
@@ -492,7 +916,30 @@ public sealed partial class GenerationViewModel : ObservableObject
                 if (!skipped.Contains(name)) skipped.Add(name);
         _skippedHooks = skipped;
 
-        return new GenerationJob(recipes, pools, opts, lineCountEach, _lastSeedUsed);
+        return new GenerationJob(recipes, pools, opts, lineCounts, _lastSeedUsed, lockKeys, locked, droppedLocks);
+    }
+
+    /// <summary>조합이 바닥나 요청보다 적게 뽑은 레시피 요약(상태 메시지 꼬리). 레시피별 경고 문구는 이걸로 대신한다.</summary>
+    private static string ExhaustedNote(GenerationJob job, IReadOnlyList<RecipeOutput> outputs)
+    {
+        var capped = outputs.Select((o, i) => (o, i)).Where(x => x.o.Result.Exhausted)
+            .Select(x => $"{x.o.Recipe.Name}({x.o.Result.Lines.Count}/{job.LineCounts[x.i]})").ToList();
+        if (capped.Count == 0) return "";
+        return $" ⚠ 조합이 바닥나 줄 수를 줄인 레시피 {capped.Count}개(중복 줄 안 넣음): "
+            + string.Join(", ", capped.Take(5)) + (capped.Count > 5 ? $" 외 {capped.Count - 5}개" : "");
+    }
+
+    /// <summary>상태 메시지에 붙일 경고들 — 조합 바닥 경고는 <see cref="ExhaustedNote"/>가 레시피별로 모아 보여 주므로 뺀다.</summary>
+    private static IEnumerable<string> OtherWarnings(GenerationResult result) =>
+        result.Warnings.Where(w => !w.Contains("조합이 바닥나 ", StringComparison.Ordinal));
+
+    /// <summary>잠근 줄을 어떻게 썼는지 상태 메시지 꼬리.</summary>
+    private static string LockNote(GenerationJob job)
+    {
+        int kept = job.Locked.Sum(l => l.Count);
+        var note = kept > 0 ? $" 📌 잠근 줄 {kept}개 유지" : "";
+        if (job.DroppedLocks > 0) note += $" ⚠ 이번 대상이 아닌 레시피의 잠근 줄 {job.DroppedLocks}개는 목록에서 빠졌습니다";
+        return note;
     }
 
     /// <summary>후보가 없어 건너뛴 훅이 있으면 알린다.</summary>
@@ -501,7 +948,141 @@ public sealed partial class GenerationViewModel : ObservableObject
 
     /// <summary>레시피 하나의 생성 결과(어느 레시피가 뽑았는지 함께). 레시피별 파일 분리
     /// 출력이 "어느 파일에 무엇을 쓸지" 알려면 합치기 전 단위가 남아 있어야 한다.</summary>
-    private sealed record RecipeOutput(Recipe Recipe, GenerationResult Result);
+    private sealed record RecipeOutput(Recipe Recipe, string LockKey, GenerationResult Result, int LockedCount, long ElapsedMs = 0);
+
+    /// <summary>생성 기록을 남긴다(백그라운드 — 실패해도 생성 결과에는 영향 없음, 상태 표시줄에만).</summary>
+    private void SaveGenerationRecord(GenerationJob job, IReadOnlyList<RecipeOutput> outputs)
+    {
+        if (AppWriteGuard.Frozen) return;
+        var record = new GenerationRecord
+        {
+            At = DateTime.Now,
+            Seed = job.Seed,
+            OutputPath = OutputPath,
+            Mode = Mode.ToString(),
+            OptionsSummary = $"중복 회피 {(job.Options.AvoidDuplicateLines ? "켬" : "끔")} · 모순 회피 {(job.Options.AvoidConflicts ? "켬" : "끔")}"
+                             + $"(로컬 {(job.Options.LocalConflictFiltering ? "켬" : "끔")}) · {(job.Options.Sampling == SamplingMode.Weighted ? "빈도 가중" : "균등")}"
+                             + (QualityTagsEnabled ? " · 품질 태그 붙임" : ""),
+            Recipes = outputs.Select((o, i) => new GenerationRecordRecipe
+            {
+                Id = o.Recipe.Id, Name = o.Recipe.Name, LockKey = o.LockKey, Requested = job.LineCounts[i],
+                Lines = o.Result.Lines.ToList(), LineKeys = o.Result.LineKeys.ToList(),
+            }).ToList(),
+        };
+        _ = Task.Run(() =>
+        {
+            try { GenerationHistoryStore.Save(AppPaths.GenerationHistoryDir, record); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() => _main.Status = "⚠ 생성 기록 저장 실패 — " + ex.Message);
+            }
+        });
+    }
+
+    /// <summary>생성 기록 창(다시 띄우기·같은 시드로).</summary>
+    [RelayCommand]
+    private void ShowGenerationHistory() =>
+        new Views.GenerationHistoryWindow(this) { Owner = System.Windows.Application.Current.MainWindow }.Show();
+
+    /// <summary>기록을 결과 목록에 다시 띄운다(출처 정보는 없다 — 잠금·다시 뽑기는 된다).</summary>
+    public void LoadGenerationRecord(GenerationRecord record)
+    {
+        var outputs = record.Recipes.Select(r => new RecipeOutput(
+            new Recipe { Id = r.Id, Name = r.Name }, r.LockKey,
+            new GenerationResult(r.Lines, Array.Empty<string>()) { LineKeys = r.LineKeys }, 0)).ToList();
+        ShowResults(outputs);
+        ConflictReport = "";
+        _main.Status = $"{record.At:MM-dd HH:mm} 생성 기록({outputs.Sum(o => o.Result.Lines.Count)}줄, 시드 {record.Seed})을 목록에 띄웠습니다 — 줄 출처는 기록에 없습니다.";
+    }
+
+    public void UseSeed(int seed)
+    {
+        SeedText = seed.ToString();
+        _main.Status = $"시드를 {seed}(으)로 맞췄습니다 — 같은 레시피·옵션이면 같은 줄이 나옵니다.";
+    }
+
+    /// <summary>마지막 일괄 생성에서 문제(조합 바닥·중복·모순 남음)가 있던 레시피 id — [⚠ 지난번 문제만].</summary>
+    private List<string> _problemRecipeIds = new();
+    /// <summary>"⚠ 지난번 문제만 (2)" 버튼 글자. 문제가 없었으면 빈 문자열(버튼 숨김).</summary>
+    [ObservableProperty] private string _problemCountText = "";
+    /// <summary>생성 뒤 둘째 줄: "⚠ 문제 3건(조합 바닥 2 · 모순 남은 줄 1) — 로그에 기록함". 문제가 없으면 빈 문자열.</summary>
+    [ObservableProperty] private string _problemSummaryText = "";
+
+    /// <summary>카드 '토큰 기준' 칸의 숫자. 비었거나 0 이하·숫자 아님이면 0(= 모델 기본값).</summary>
+    private int ParsedTokenLimit() => int.TryParse(ProfileTokenLimitText.Trim(), out var n) && n > 0 ? n : 0;
+
+    /// <summary>지금 적용되는 토큰 규칙(카드 '토큰 기준'의 모델·숫자, 비면 모델 기본값).</summary>
+    internal (Core.Tokenization.ITokenCounter Counter, int Limit) CurrentTokenRule()
+    {
+        // 카드의 '토큰 기준'(보이는 값) 그대로 — 예전엔 고른 저장 프로필에서만 읽어서, 새로 저장했거나 재시작한 뒤엔 IL로 돌아갔다.
+        var model = ProfileModel;
+        var limit = ParsedTokenLimit() is > 0 and var l ? l : Core.Tokenization.TokenCounters.DefaultLimit(model);
+        return (Core.Tokenization.TokenCounters.For(model, AppPaths.TokenizersDir), limit);
+    }
+
+    /// <summary>레시피마다 문제만 잘라(<see cref="Core.Logging.GenerationProblems"/>) 카드 요약을 갱신하고, 일괄 "생성"일 때만 로그에 남긴다.
+    /// 미리보기는 몇 줄뿐이라 판단 근거가 약하고 누를 때마다 같은 항목이 쌓여 로그에 남기지 않는다(카드에만 보인다).
+    /// 생성도 같은 레시피 내용의 같은 문제는 하루 한 번만 남는다(<see cref="AppLog.Concept"/>).
+    /// 문제 레시피 목록([⚠ 지난번 문제만])도 일괄 "생성" 때만 바꾼다.</summary>
+    private void LogProblems(GenerationJob job, IReadOnlyList<RecipeOutput> outputs, bool isPreview)
+    {
+        var (counter, limit) = CurrentTokenRule();
+        var now = DateTime.Now;
+        var all = new List<(Core.Logging.LogEntry Entry, string RepeatKey)>();
+        var problemIds = new List<string>();
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        for (int i = 0; i < outputs.Count; i++)
+        {
+            var o = outputs[i];
+            var input = new Core.Logging.GenerationProblemInput(
+                o.Recipe, job.Pools, o.Result, job.LineCounts[i], isPreview, unchecked(job.Seed + i), counter, limit,
+                ApplyQualityTags(o.Result).Lines, now);
+            bool problem = false;
+            foreach (var e in Core.Logging.GenerationProblems.From(input))
+            {
+                var kind = Core.Logging.GenerationProblems.KindOf(e) ?? e.Title;
+                counts[kind] = counts.GetValueOrDefault(kind) + 1;
+                if (kind != Core.Logging.GenerationProblems.TooLong) problem = true;
+                if (!isPreview) all.Add((e, Core.Logging.GenerationProblems.RepeatKey(input, e)));
+            }
+            if (problem) problemIds.Add(o.Recipe.Id);
+        }
+        int written = isPreview ? 0 : AppLog.Concept(all);
+
+        int total = counts.Values.Sum();
+        var parts = new[] { Core.Logging.GenerationProblems.Exhausted, Core.Logging.GenerationProblems.Duplicates,
+                            Core.Logging.GenerationProblems.Conflicts, Core.Logging.GenerationProblems.TooLong }
+            .Where(counts.ContainsKey).Select(k => $"{k} {counts[k]}");
+        var where = isPreview ? "미리보기 — 로그엔 안 남김"
+            : written == total ? "로그에 기록함"
+            : written == 0 ? "같은 문제는 오늘 이미 로그에 있음"
+            : $"새 문제 {written}건만 로그에 기록(나머지는 오늘 이미 있음)";
+        ProblemSummaryText = total == 0 ? "" : $"⚠ 문제 {total}건({string.Join(" · ", parts)}) — {where}";
+
+        if (!isPreview && IsMultiRecipeMode)
+        {
+            _problemRecipeIds = problemIds;
+            ProblemCountText = problemIds.Count == 0 ? "" : $"⚠ 지난번 문제만 ({problemIds.Count})";
+        }
+    }
+
+    [RelayCommand]
+    private void OpenLog() => _main.OpenLogCommand.Execute(null);
+
+    /// <summary>마지막 일괄 생성에서 문제가 있던 레시피만 체크한다 — 고친 뒤 그것만 다시 돌리는 용도.</summary>
+    [RelayCommand]
+    private void SelectProblemRecipes()
+    {
+        if (_problemRecipeIds.Count == 0) { _main.Status = "마지막 일괄 생성에서 문제가 있던 레시피가 없습니다."; return; }
+        var ids = _problemRecipeIds.ToHashSet(StringComparer.Ordinal);
+        foreach (var item in _allBatchItems) item.IsChecked = ids.Contains(item.Recipe.Id);
+        IsMultiRecipeMode = true;
+        RefreshBatchItems();
+        _main.Status = $"문제가 있던 레시피 {ids.Count}개만 체크했습니다.";
+    }
+
+    /// <summary>레시피 하나에서 새로 뽑을 줄 수(잠근 줄만큼 덜 뽑는다).</summary>
+    private static int FreshCount(GenerationJob job, int i) => Math.Max(0, job.LineCounts[i] - job.Locked[i].Count);
 
     /// <summary>레시피마다 lineCountEach줄씩 뽑는다. 레시피마다 시드를 base+순번으로 달리해
     /// 서로 다른 레시피가 완전히 같은 난수 시퀀스를 타지 않게 한다. UI를 전혀 건드리지
@@ -513,6 +1094,7 @@ public sealed partial class GenerationViewModel : ObservableObject
     {
         int count = job.Recipes.Count;
         var results = new GenerationResult?[count];
+        var elapsed = new long[count];
         var errors = new Exception?[count];
         var linesDone = new int[count];
         var conflicts = _main.Conflicts;
@@ -520,7 +1102,13 @@ public sealed partial class GenerationViewModel : ObservableObject
 
         Parallel.For(0, count, new ParallelOptions { CancellationToken = token }, i =>
         {
-            var opts = CopyWith(job.Options, job.LineCountEach, unchecked(job.Seed + i));
+            var locked = job.Locked[i];
+            var opts = CopyWith(job.Options, FreshCount(job, i), unchecked(job.Seed + i)) with
+            {
+                // 줄 출처 보기용. 기록만 하므로 같은 시드면 끈 때와 같은 줄이 나온다.
+                CaptureOrigins = true,
+                ReservedLineKeys = locked.Count > 0 ? locked.Select(l => l.LineKey).ToHashSet(StringComparer.Ordinal) : null,
+            };
             var inner = new SyncProgress(n =>
             {
                 Volatile.Write(ref linesDone[i], n);
@@ -528,8 +1116,10 @@ public sealed partial class GenerationViewModel : ObservableObject
                 for (int k = 0; k < linesDone.Length; k++) sum += Volatile.Read(ref linesDone[k]);
                 progress.Report(sum);
             });
-            try { results[i] = _generator.Generate(job.Recipes[i], job.Pools, opts, conflicts, tagInfo, inner, token); }
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            try { results[i] = Compose(locked, _generator.Generate(job.Recipes[i], job.Pools, opts, conflicts, tagInfo, inner, token)); }
             catch (Exception ex) { errors[i] = ex; }
+            elapsed[i] = sw.ElapsedMilliseconds;
         });
 
         token.ThrowIfCancellationRequested();
@@ -547,7 +1137,8 @@ public sealed partial class GenerationViewModel : ObservableObject
             }
         }
 
-        return Enumerable.Range(0, count).Select(i => new RecipeOutput(job.Recipes[i], results[i]!)).ToList();
+        return Enumerable.Range(0, count)
+            .Select(i => new RecipeOutput(job.Recipes[i], job.LockKeys[i], results[i]!, job.Locked[i].Count, elapsed[i])).ToList();
     }
 
     /// <summary>호출한 스레드에서 바로 콜백하는 진행률 보고기. <see cref="Progress{T}"/>는 만든 스레드의
@@ -587,7 +1178,7 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// 스레드에서 통째로 돌아, 레시피 수십 개 × 수백 줄이면 창이 몇 초씩 응답하지 않았다.</summary>
     private async Task<List<RecipeOutput>> RunInBackgroundAsync(GenerationJob job, CancellationToken token)
     {
-        long total = (long)job.Recipes.Count * job.LineCountEach;
+        long total = Enumerable.Range(0, job.Recipes.Count).Sum(i => (long)FreshCount(job, i));
         // Progress<T>는 만들어진 스레드(여기선 UI)의 컨텍스트로 콜백을 돌려준다.
         var progress = new Progress<int>(n =>
             ProgressText = total > 0 ? $"{n:N0}/{total:N0}줄 ({n * 100 / total}%)" : "");
@@ -604,18 +1195,6 @@ public sealed partial class GenerationViewModel : ObservableObject
         return result with { Lines = prefixed };
     }
 
-    /// <summary>줄 길이 예산(guide.md 24~27태그) 요약을 갱신한다. 예산을 넘는 줄이 있으면
-    /// 몇 줄인지 같이 알려 준다 — 넘으면 뒤쪽 태그가 밀려 반영이 약해진다.</summary>
-    private void RefreshLineStats(GenerationResult result)
-    {
-        var stats = LineStats.Measure(result.Lines, lookup: _main.TagInfo);
-        if (stats.LineCount == 0) { LineStatsText = ""; return; }
-        // 토큰은 거친 근사(LineStats.EstimateClipTokens) — 75토큰 청크를 넘는 줄이 얼마나 되는지 보는 눈대중용.
-        LineStatsText = $"줄당 태그 평균 {stats.Average} · 최소 {stats.Min} · 최대 {stats.Max}"
-            + (stats.OverBudget > 0 ? $"  ⚠ 예산({stats.Budget}) 초과 {stats.OverBudget}줄" : "")
-            + $"\n자연어 단어 평균 {stats.PhraseWordsAverage}(최대 {stats.PhraseWordsMax}) · 추정 토큰 평균 {stats.TokensAverage}(최대 {stats.TokensMax})"
-            + (stats.MultiChunkLines > 0 ? $"  ⚠ 75토큰 넘는 줄 {stats.MultiChunkLines}줄(최대 {stats.ChunksMax}청크)" : "");
-    }
 
     /// <summary>미리보기 내용을 클립보드로. 읽기 전용 상자에서 드래그로 긁는 것보다 빠르다.</summary>
     [RelayCommand]
@@ -687,15 +1266,21 @@ public sealed partial class GenerationViewModel : ObservableObject
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var result = ApplyQualityTags(Merge(await RunInBackgroundAsync(BuildJob(Math.Min(20, LineCount)), token)));
-            PreviewText = string.Join("\n", result.Lines);
+            var job = BuildJob(preview: true);
+            var outputs = await RunInBackgroundAsync(job, token);
+            var result = ApplyQualityTags(Merge(outputs));
+            ShowResults(outputs);
+            LogProblems(job, outputs, isPreview: true);
             ConflictReport = BuildConflictReport(result);
-            RefreshLineStats(result);
+            ResultSummaryText = $"미리보기 {result.Lines.Count:N0}줄 · 시드 {_lastSeedUsed}" + LockNote(job);
+            AutoOpenResultsIfWanted();
             var seedNote = $"(시드 {_lastSeedUsed})";
-            _main.Status = (result.Warnings.Count > 0 ? string.Join(" / ", result.Warnings) : "미리보기 완료")
-                + " " + seedNote + SkippedHookNote();
+            var warns = OtherWarnings(result).ToList();
+            _main.Status = (warns.Count > 0 ? string.Join(" / ", warns) : "미리보기 완료")
+                + " " + seedNote + ExhaustedNote(job, outputs) + LockNote(job) + SkippedHookNote();
         }
         catch (OperationCanceledException) { _main.Status = "미리보기 취소됨"; }
+        // 미리보기의 검증 오류는 상태 표시줄에만(로그엔 [생성] 때 남는다 — 누를 때마다 쌓이지 않게).
         catch (GenerationValidationException ex) { _main.Status = "검증 오류: " + ex.Message; }
         finally { ProgressText = ""; }
     }
@@ -707,7 +1292,8 @@ public sealed partial class GenerationViewModel : ObservableObject
         if (MultiModeBlockedWithNoSelection()) return;
         try
         {
-            var outputs = await RunInBackgroundAsync(BuildJob(LineCount), token);
+            var job = BuildJob(preview: false);
+            var outputs = await RunInBackgroundAsync(job, token);
             var result = ApplyQualityTags(Merge(outputs));
 
             // 파일 쓰기도 백그라운드로. 취소된 뒤엔 아예 쓰지 않는다(파일은 그대로 남는다).
@@ -750,15 +1336,34 @@ public sealed partial class GenerationViewModel : ObservableObject
 
             _main.Settings.LastOutputDir = Path.GetDirectoryName(OutputPath) ?? "";
             SaveSettings();
+            SaveGenerationRecord(job, outputs);
+            _main.MarkRecipesUsed(IsMultiRecipeMode
+                ? _allBatchItems.Where(b => b.IsChecked).Select(b => (string?)b.Recipe.Id)
+                : new[] { _main.RecipeBuilder.LoadedRecipeId });
+            // 쓴 내용을 목록에도 띄운다 — 예전엔 파일로만 나가서 무엇이 써졌는지 보려면 파일을 열어야 했다.
+            ShowResults(outputs);
+            LogProblems(job, outputs, isPreview: false);
             ConflictReport = BuildConflictReport(result);
-            RefreshLineStats(result);
+            ResultSummaryText = (outputs.Count > 1 ? $"✓ {outputs.Count}개 레시피 " : "✓ ")
+                + $"{result.Lines.Count:N0}줄 → {(SplitFilesPerRecipe && IsMultiRecipeMode ? where : Path.GetFileName(path))} · {ModeText(mode)} · 시드 {_lastSeedUsed}"
+                + LockNote(job);
+            AutoOpenResultsIfWanted();
+            var warns = OtherWarnings(result).ToList();
             _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {where} (시드 {_lastSeedUsed})"
-                + (result.Warnings.Count > 0 ? " (" + string.Join(", ", result.Warnings) + ")" : "")
-                + SkippedHookNote();
+                + (warns.Count > 0 ? " (" + string.Join(", ", warns) + ")" : "")
+                + ExhaustedNote(job, outputs) + LockNote(job) + SkippedHookNote();
         }
         catch (OperationCanceledException) { _main.Status = "생성 취소됨 — 파일은 건드리지 않았습니다."; }
-        catch (GenerationValidationException ex) { _main.Status = "검증 오류: " + ex.Message; }
-        catch (IOException ex) { _main.Status = "파일 오류: " + ex.Message; }
+        catch (GenerationValidationException ex)
+        {
+            _main.Status = "검증 오류: " + ex.Message;
+            AppLog.Program("생성 검증 오류", ex.Message);
+        }
+        catch (IOException ex)
+        {
+            _main.Status = "파일 오류: " + ex.Message;
+            AppLog.Exception("파일 쓰기 실패 — " + OutputPath, ex);
+        }
         finally { ProgressText = ""; }
     }
 }

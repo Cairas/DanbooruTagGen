@@ -5,6 +5,12 @@ namespace DanbooruTagGen.Core.Generation;
 public sealed class WildcardGenerator
 {
     private const int MaxDedupeRetries = 50;
+    /// <summary><see cref="GenerationOptions.StopWhenExhausted"/>: 재추첨 한도를 다 써도 중복인 줄이 이만큼 연달아 나오면 멈춘다.
+    /// 작으면 가중치가 낮은 조합이 남아 있는데도 일찍 멈춘다(한 줄 실패 = 50번 연속 기존 줄). 실측(2026-11-20, 조합이 바닥나는
+    /// 9팩·200줄): 3이면 창가 자연광이 159줄에서 멈췄고 6이면 200줄을 다 채웠다. 10은 몇 줄 더 얻는 대신 시간이 1.5배.</summary>
+    private const int ExhaustedAfterFailedLines = 6;
+    /// <summary>바닥난 뒤 남은 조합을 정확히 채우려고 전부 펼쳐 볼 최대 조합 수. 이보다 큰 레시피는 200줄 안팎에서 바닥나는 일이 거의 없다.</summary>
+    private const int MaxFillCombinations = 20_000;
     /// <summary>진행률을 보고하는 간격(줄). 매 줄 보고하면 UI 스레드로 넘어가는 알림이
     /// 생성 자체보다 비싸진다.</summary>
     private const int ProgressChunk = 25;
@@ -129,6 +135,9 @@ public sealed class WildcardGenerator
         bool checkConflicts = options.AvoidConflicts && rules.Count > 0;
         var local = checkConflicts && options.LocalConflictFiltering ? new LocalFilter(rules) : null;
         var trace = observer != null ? new List<PickRecord>() : null;
+        // 줄 출처(앱 표시용). 재추첨으로 버린 시도는 trace처럼 매번 비운다.
+        var slotOrigins = options.CaptureOrigins ? new List<SlotOrigin>() : null;
+        var origins = options.CaptureOrigins ? new List<LineOrigin>(options.LineCount) : null;
         // 메타데이터(빈도·그룹)가 없으면 가중/정렬은 자동으로 비활성(Uniform·미정렬)으로 폴백.
         var orderer = options.AutoOrderTags && tagInfo is not null ? new TagOrdering(tagInfo) : null;
 
@@ -138,6 +147,9 @@ public sealed class WildcardGenerator
         var lineConflicts = new List<LineConflict>();
         // 줄 중복 판정 키 집합(LineKey) — 렌더링된 원문이 아니다.
         var seen = new HashSet<string>(StringComparer.Ordinal);
+        // 잠근 줄처럼 이미 쓰기로 정해진 줄은 처음부터 "본 줄"로 둔다.
+        if (options.AvoidDuplicateLines && options.ReservedLineKeys is { } reserved) seen.UnionWith(reserved);
+        var lineKeys = new List<string>(options.LineCount);
         bool dupWarned = false, conflictWarned = false;
 
         // ALT 슬롯마다 "바로 전 줄에서 뽑힌 그룹"을 기억해 뒀다가, 이번 줄에서 같은 그룹이
@@ -151,10 +163,11 @@ public sealed class WildcardGenerator
         var lastPickedByPool = new Dictionary<RandomPoolSlot, HashSet<string>>();
 
         // 한 줄을 생성하고(가중 추첨) 표준 순서로 정렬한다. 재추첨 루프와 공유.
-        List<(string Tag, SlotRole Role)> NextParts()
+        List<(string Tag, SlotRole Role)> NextParts(object?[]? forced = null)
         {
             trace?.Clear();   // 재추첨으로 버린 시도의 기록은 남기지 않는다
-            var p = GenerateLineParts(recipe, poolsById, options, rnd, tagInfo, lastPickedByAlt, local, trace, lastPickedByPool);
+            slotOrigins?.Clear();
+            var p = GenerateLineParts(recipe, poolsById, options, rnd, tagInfo, lastPickedByAlt, local, trace, lastPickedByPool, slotOrigins, forced);
             if (orderer is null) return p;
             // 정렬은 태그 기준이므로, 정렬 결과 순서에 맞춰 역할을 다시 붙인다.
             var roleOf = new Dictionary<string, SlotRole>(StringComparer.Ordinal);
@@ -167,30 +180,102 @@ public sealed class WildcardGenerator
         string Render(List<(string Tag, SlotRole Role)> parts) =>
             JoinLine(parts.Select(p => p.Tag).ToList(), options);
 
-        for (int i = 0; i < options.LineCount; i++)
+        // 서로 다른 줄이 바닥났을 때(재추첨 한도를 다 써도 중복): 조합이 작은 레시피는 가능한 조합을 전부 펼쳐 아직 안 나온 것으로
+        // 정확히 채운다(CombinationEnumerator). 펼칠 수 없을 만큼 크면 StopWhenExhausted는 "연달아 실패하면 멈춤"으로 근사한다.
+        // 바닥나기 전에는 이 경로를 전혀 타지 않으므로 난수 소비·출력이 예전과 같다.
+        List<CombinationEnumerator.Combo>? fill = null;
+        bool fillTried = false;
+        int fillCursor = 0;
+        bool TryFill(out List<(string Tag, SlotRole Role)> fp, out List<string> ft, out string fl, out string fk)
         {
+            if (!fillTried)
+            {
+                fillTried = true;
+                var all = CombinationEnumerator.Enumerate(recipe, poolsById, MaxFillCombinations);
+                if (all != null) fill = CombinationEnumerator.WeightedOrder(all, rnd);
+            }
+            while (fill != null && fillCursor < fill.Count)
+            {
+                fp = NextParts(fill[fillCursor++].Choices);
+                ft = fp.Select(p => p.Tag).ToList();
+                fk = LineKey(ft);
+                if (seen.Contains(fk) || (checkConflicts && rules.HasConflict(ft))) continue;
+                fl = Render(fp);
+                return true;
+            }
+            fp = null!; ft = null!; fl = null!; fk = null!;
+            return false;
+        }
+
+        // 보통 경로: 한 줄 뽑고, 중복/모순이면 한 번의 재추첨 루프에서 함께 피한다.
+        void Draw(out List<(string Tag, SlotRole Role)> dp, out List<string> dt, out string dl, out string dk, out int dr)
+        {
+            dp = NextParts();
+            dt = dp.Select(p => p.Tag).ToList();
+            dl = Render(dp);
+            dk = LineKey(dt);
+            dr = 0;
+            while (dr < MaxDedupeRetries &&
+                   ((options.AvoidDuplicateLines && seen.Contains(dk)) ||
+                    (checkConflicts && rules.HasConflict(dt))))
+            {
+                dp = NextParts();
+                dt = dp.Select(p => p.Tag).ToList();
+                dl = Render(dp);
+                dk = LineKey(dt);
+                dr++;
+            }
+        }
+
+        int exhaustedStreak = 0;
+        bool exhausted = false;
+        while (lines.Count < options.LineCount)
+        {
+            int i = lines.Count;
             cancellationToken.ThrowIfCancellationRequested();
             if (progress != null && i % ProgressChunk == 0) progress.Report(i);
 
-            var parts = NextParts();
-            var tags = parts.Select(p => p.Tag).ToList();
-            string line = Render(parts);
-            string lineKey = LineKey(tags);
-
-            // 중복/모순을 한 번의 재추첨 루프에서 함께 피한다.
+            List<(string Tag, SlotRole Role)> parts;
+            List<string> tags;
+            string line, lineKey;
             int retries = 0;
-            while (retries < MaxDedupeRetries &&
-                   ((options.AvoidDuplicateLines && seen.Contains(lineKey)) ||
-                    (checkConflicts && rules.HasConflict(tags))))
+            bool duplicate;
+            if (fill != null)
             {
-                parts = NextParts();
-                tags = parts.Select(p => p.Tag).ToList();
-                line = Render(parts);
-                lineKey = LineKey(tags);
-                retries++;
+                // 이미 바닥난 뒤: 남은 조합에서 바로 꺼낸다(무작위 재추첨은 거의 다 실패하므로 건너뛴다).
+                if (TryFill(out parts, out tags, out line, out lineKey)) duplicate = false;
+                else if (options.StopWhenExhausted) { exhausted = true; break; }
+                else
+                {
+                    Draw(out parts, out tags, out line, out lineKey, out retries);
+                    duplicate = options.AvoidDuplicateLines && seen.Contains(lineKey);
+                }
+            }
+            else
+            {
+                Draw(out parts, out tags, out line, out lineKey, out retries);
+                duplicate = options.AvoidDuplicateLines && seen.Contains(lineKey);
+                if (duplicate && !fillTried)
+                {
+                    if (TryFill(out var fp, out var ft, out var fl, out var fk))
+                    {
+                        (parts, tags, line, lineKey) = (fp, ft, fl, fk);
+                        duplicate = false;
+                    }
+                    else if (fill != null && options.StopWhenExhausted) { exhausted = true; break; }
+                }
             }
 
-            if (options.AvoidDuplicateLines && seen.Contains(lineKey) && !dupWarned)
+            if (duplicate && options.StopWhenExhausted)
+            {
+                // 이 줄은 버린다(중복을 넣지 않는다). 한 번은 가중치가 낮은 남은 조합을 운 나쁘게 못 뽑은 것일 수 있어
+                // 몇 줄 더 시도해 보고, 그래도 연달아 실패하면 멈춘다.
+                if (++exhaustedStreak >= ExhaustedAfterFailedLines) { exhausted = true; break; }
+                continue;
+            }
+            exhaustedStreak = 0;
+
+            if (duplicate && !dupWarned)
             {
                 warnings.Add("조합 공간이 부족해 일부 줄이 중복될 수 있습니다.");
                 dupWarned = true;
@@ -215,11 +300,21 @@ public sealed class WildcardGenerator
 
             seen.Add(lineKey);
             lines.Add(line);
+            lineKeys.Add(lineKey);
+            origins?.Add(new LineOrigin(slotOrigins!.ToArray(), retries));
             observer?.Invoke(new LineTrace(i, trace!.ToArray(), retries, leftover));
         }
 
+        if (exhausted)
+            warnings.Add(fill != null
+                ? $"조합이 바닥나 {lines.Count}줄에서 멈췄습니다(요청 {options.LineCount}줄) — 가능한 서로 다른 줄을 모두 썼고, 중복 줄은 넣지 않았습니다."
+                : $"조합이 바닥나 {lines.Count}줄에서 멈췄습니다(요청 {options.LineCount}줄) — 중복 줄은 넣지 않았습니다.");
+
         progress?.Report(lines.Count);
-        return new GenerationResult(lines, warnings) { Conflicts = lineConflicts };
+        return new GenerationResult(lines, warnings)
+        {
+            Conflicts = lineConflicts, LineKeys = lineKeys, Origins = origins, Exhausted = exhausted,
+        };
     }
 
     /// <summary>줄 중복 판정 키(<see cref="GenerationOptions.AvoidDuplicateLines"/>): 줄에 **출력되는** 조각들의 판정 키
@@ -260,7 +355,9 @@ public sealed class WildcardGenerator
         Dictionary<AlternativeSlot, AlternativeGroup>? lastPickedByAlt = null,
         LocalFilter? local = null,
         List<PickRecord>? trace = null,
-        Dictionary<RandomPoolSlot, HashSet<string>>? lastPickedByPool = null)
+        Dictionary<RandomPoolSlot, HashSet<string>>? lastPickedByPool = null,
+        List<SlotOrigin>? origins = null,
+        object?[]? forced = null)
     {
         // 블록리스트·줄 내 중복은 원문이 아니라 판정 키(TagKey)로 본다 — "(lowres:1.2)"나
         // "(문장:1.1), lowres"도 lowres로 식별돼야 블록리스트가 새지 않는다.
@@ -269,15 +366,19 @@ public sealed class WildcardGenerator
         // implies:만 있는 문자열의 중복 판정용. 출력 조각의 중복(seenTags)과 섞지 않는다 — 섞으면 앞서 나온
         // implies:voyeurism 때문에 뒤의 진짜 voyeurism 태그가 "이미 나옴"으로 빠진다.
         var seenImplied = options.DedupeWithinLine ? new HashSet<string>(StringComparer.Ordinal) : null;
-        // 로컬 필터용: 지금까지 이 줄에 실제로 들어간 판정 키(implies: 포함).
-        var lineKeys = local != null ? new HashSet<string>(StringComparer.Ordinal) : null;
+        // 로컬 필터용: 지금까지 이 줄에 실제로 들어간 판정 키(implies: 포함)를 필터가 추적한다.
+        local?.BeginLine();
         var emitted = new List<(string, SlotRole)>();
+        // 출처 기록용(origins가 있을 때만). Add가 채운다.
+        List<string>? slotEmitted = null, slotDropped = null, slotFiltered = null;
 
         for (int si = 0; si < recipe.Slots.Count; si++)
         {
             var slot = recipe.Slots[si];
             if (!slot.IsEnabled) continue; // 토글로 꺼둔 슬롯은 이번 줄에서 완전히 건너뜀
 
+            if (origins != null) { slotEmitted = new(); slotDropped = new(); slotFiltered = new(); }
+            string? groupLabel = null;
             var role = SlotRoleClassifier.Classify(slot);
             switch (slot)
             {
@@ -288,7 +389,10 @@ public sealed class WildcardGenerator
                 {
                     HashSet<string>? avoidPicks = null;
                     lastPickedByPool?.TryGetValue(r, out avoidPicks);
-                    var picks = PickRandom(ResolveCandidates(r, poolsById), r, rnd, options, tagInfo, local, lineKeys, avoidPicks);
+                    // forced: 바닥난 뒤 남은 조합 채우기(CombinationEnumerator) — 뽑지 않고 정해진 후보를 그대로 쓴다.
+                    var picks = forced?[si] is IReadOnlyList<string> fixedPicks
+                        ? fixedPicks
+                        : PickRandom(ResolveCandidates(r, poolsById), r, rnd, options, tagInfo, local, avoidPicks, slotFiltered);
                     if (lastPickedByPool != null) lastPickedByPool[r] = new HashSet<string>(picks, StringComparer.Ordinal);
                     foreach (var t in picks)
                         if (Add(t, role)) trace?.Add(new PickRecord(si, null, t));
@@ -299,12 +403,24 @@ public sealed class WildcardGenerator
                     {
                         AlternativeGroup? avoid = null;
                         lastPickedByAlt?.TryGetValue(alt, out avoid);
-                        var group = PickGroup(alt, rnd, avoid, local, lineKeys);
+                        var group = forced?[si] as AlternativeGroup ?? PickGroup(alt, rnd, avoid, local, slotFiltered);
                         if (lastPickedByAlt != null) lastPickedByAlt[alt] = group;
                         trace?.Add(new PickRecord(si, group, null));
+                        if (origins != null) groupLabel = GroupDisplayName(alt, group);
                         foreach (var t in group.Tags) Add(t, role);
                     }
                     break;
+            }
+
+            if (origins != null)
+            {
+                var kind = slot switch
+                {
+                    FixedSlot => SlotOriginKind.Fixed,
+                    RandomPoolSlot => SlotOriginKind.Pool,
+                    _ => SlotOriginKind.Alternative,
+                };
+                origins.Add(new SlotOrigin(si, slot.Label, kind, groupLabel, slotEmitted!, slotDropped!, slotFiltered!));
             }
         }
         return emitted;
@@ -325,7 +441,7 @@ public sealed class WildcardGenerator
             if (tag.Contains("::", StringComparison.Ordinal)) tag = TagKey.ParsePickWeight(tag).Body;
             tag = WeightRange.Resolve(tag, rnd);
             var frags = TagKey.Split(tag);
-            if (blocklist.Count > 0 && frags.Any(f => blocklist.Contains(f.Key))) return false;
+            if (blocklist.Count > 0 && frags.Any(f => blocklist.Contains(f.Key))) { slotDropped?.Add(tag); return false; }
             if (seenTags != null)
             {
                 bool hasOutput = false, allSeen = true;
@@ -336,11 +452,12 @@ public sealed class WildcardGenerator
                     if (!seenTags.Contains(f.Key)) allSeen = false;
                 }
                 if (!hasOutput) allSeen = frags.All(f => seenImplied!.Contains(f.Key) || seenTags.Contains(f.Key));
-                if (allSeen) return false;
+                if (allSeen) { slotDropped?.Add(tag); return false; }
                 foreach (var f in frags) (f.IsImplied ? seenImplied! : seenTags).Add(f.Key);
             }
             emitted.Add((tag, r));
-            if (lineKeys != null) foreach (var f in frags) lineKeys.Add(f.Key);
+            slotEmitted?.Add(tag);
+            if (local != null) foreach (var f in frags) local.Add(f.Key);
             return true;
         }
     }
@@ -404,7 +521,7 @@ public sealed class WildcardGenerator
     /// 접두(<c>N::</c>, 없으면 1). 접두는 "이 풀 안에서 이 후보를 몇 배로 띄울지"라서, 어느 추첨 방식이든
     /// 배율로 곱한다. 0이면 절대 안 뽑힌다.</para>
     /// <para><paramref name="local"/>이 있으면 슬롯 단위 로컬 필터(<see cref="GenerationOptions.LocalConflictFiltering"/>):
-    /// <paramref name="lineKeys"/>(앞쪽 슬롯에서 확정된 판정 키) + 이 슬롯에서 이미 뽑은 후보와 새로 충돌하는
+    /// 앞쪽 슬롯에서 확정된 판정 키(필터가 추적) + 이 슬롯에서 이미 뽑은 후보와 새로 충돌하는
     /// 후보를 그 회차에서 뺀다.</para>
     /// <para>접두도 필터도 없는 균등 추첨은 예전 <see cref="PickUniform"/>을, 빈도 가중은 예전과 같은 정수 룰렛을
     /// 그대로 탄다 — 난수 소비가 한 번도 달라지지 않아 기존 레시피는 같은 시드에서 같은 줄이 나온다.</para>
@@ -413,8 +530,9 @@ public sealed class WildcardGenerator
     internal static IReadOnlyList<string> PickRandom(
         IReadOnlyList<string> candidates, RandomPoolSlot slot, IRandomSource rnd,
         GenerationOptions options, ITagLookup? tagInfo,
-        LocalFilter? local = null, HashSet<string>? lineKeys = null,
-        HashSet<string>? avoid = null)
+        LocalFilter? local = null,
+        HashSet<string>? avoid = null,
+        List<string>? filteredOut = null)
     {
         // 발동 여부를 개수보다 먼저 굴린다. 100(기본값)이면 굴림 자체를 생략한다 — 난수를 한 번이라도
         // 더 소비하면 뒤따르는 모든 추첨이 밀려, chancePercent가 없는 기존 레시피가 같은 시드에서
@@ -431,7 +549,7 @@ public sealed class WildcardGenerator
 
         // 빈도 메타데이터가 있을 때만 가중 추첨. 없으면 균등으로 폴백.
         bool byFrequency = options.Sampling == SamplingMode.Weighted && tagInfo is not null;
-        bool filtering = local != null && lineKeys != null;
+        bool filtering = local != null;
         if (avoid is { Count: 0 } || count >= pickable) avoid = null;
         // 균등 + 회피는 가중치 전부 1인 룰렛으로 탄다 — 그 룰렛의 난수 소비는 PickUniform과 정확히 같아서
         // (rnd.Next(남은 수) → 그 위치), 회피가 실제로 일어나는 회차 말고는 같은 시드에서 같은 결과가 나온다.
@@ -443,7 +561,7 @@ public sealed class WildcardGenerator
             for (int i = 0; i < weights.Length; i++)
                 weights[i] = (int)Math.Min(int.MaxValue, (long)weights[i] * pickWeights[i]);
 
-        return PickRoulette(candidates, weights, count, slot.MinCount, rnd, filtering ? local : null, lineKeys, avoid);
+        return PickRoulette(candidates, weights, count, slot.MinCount, rnd, local, avoid, filteredOut);
     }
 
     /// <summary>후보별 추첨 가중치 접두(<c>N::</c>). 접두가 하나도 없으면 null(=전부 1, 기존 경로).</summary>
@@ -480,14 +598,25 @@ public sealed class WildcardGenerator
     /// 여러 개를 뽑는 슬롯·avoid가 여럿일 때는 근사다. 다른 후보가 없으면(전부 avoid) 그냥 받아들인다.</para></summary>
     private static List<string> PickRoulette(
         IReadOnlyList<string> candidates, int[] weightsIn, int count, int minCount, IRandomSource rnd,
-        LocalFilter? local, HashSet<string>? lineKeys, HashSet<string>? avoid = null)
+        LocalFilter? local, HashSet<string>? avoid = null, List<string>? filteredOut = null)
+    {
+        // 이 슬롯에서 뽑은 후보는 다음 회차 판정에 포함하되(줄 + 이미 뽑은 것), 슬롯이 끝나면 줄 기준으로 되돌린다 —
+        // 실제로 줄에 들어갈지는 호출부(Add: 블록리스트·줄 내 중복)가 정한다.
+        if (local == null) return PickRouletteCore(candidates, weightsIn, count, minCount, rnd, null, avoid, null);
+        var mark = local.Mark();
+        try { return PickRouletteCore(candidates, weightsIn, count, minCount, rnd, local, avoid, filteredOut); }
+        finally { local.Rollback(mark); }
+    }
+
+    private static List<string> PickRouletteCore(
+        IReadOnlyList<string> candidates, int[] weightsIn, int count, int minCount, IRandomSource rnd,
+        LocalFilter? local, HashSet<string>? avoid, List<string>? filteredOut)
     {
         var remaining = new List<string>(candidates.Count);
         var weights = new List<int>(candidates.Count);
         for (int i = 0; i < candidates.Count; i++)
             if (weightsIn[i] > 0) { remaining.Add(candidates[i]); weights.Add(weightsIn[i]); }
 
-        HashSet<string>? work = local != null ? new HashSet<string>(lineKeys!, StringComparer.Ordinal) : null;
         var eligible = local != null ? new List<int>(remaining.Count) : null;
 
         var picked = new List<string>(count);
@@ -498,9 +627,19 @@ public sealed class WildcardGenerator
             {
                 eligible!.Clear();
                 for (int j = 0; j < remaining.Count; j++)
-                    if (local.Allows(work!, remaining[j])) eligible.Add(j);
+                    if (local.Allows(remaining[j])) eligible.Add(j);
                 if (eligible.Count == 0 && picked.Count >= minCount) break;
                 filtered = eligible.Count > 0 && eligible.Count < remaining.Count;
+                // 출처 기록: 이번 회차에 실제로 빠진 후보(폴백으로 필터 없이 굴리는 회차는 빠진 게 없다).
+                if (filtered && filteredOut != null)
+                {
+                    int e = 0;
+                    for (int j = 0; j < remaining.Count; j++)
+                    {
+                        if (e < eligible.Count && eligible[e] == j) { e++; continue; }
+                        if (!filteredOut.Contains(remaining[j])) filteredOut.Add(remaining[j]);
+                    }
+                }
             }
 
             int count2 = filtered ? eligible!.Count : weights.Count;
@@ -525,7 +664,7 @@ public sealed class WildcardGenerator
                 idx = AvoidRepeat(remaining, weights, filtered ? eligible : null, count2, total, idx, avoid, rnd);
 
             picked.Add(remaining[idx]);
-            work?.UnionWith(local!.KeysOf(remaining[idx]));
+            local?.AddCandidate(remaining[idx]);
             remaining.RemoveAt(idx);
             weights.RemoveAt(idx);
         }
@@ -595,19 +734,25 @@ public sealed class WildcardGenerator
     /// 캡을 걸어 뒀고, 다 실패해도 마지막 결과를 그냥 받아들이고 끝낸다.</summary>
     private const int MaxAvoidRepeatRetries = 5;
 
-    /// <param name="local">슬롯 단위 로컬 필터. 있으면 <paramref name="lineKeys"/>(앞쪽 슬롯에서 확정된 키)와
+    /// <param name="local">슬롯 단위 로컬 필터. 있으면 앞쪽 슬롯에서 확정된 키(필터가 추적)와
     /// 새로 충돌하는 그룹을 빼고 그중에서 고른다. 전부 걸러지면 원래 그룹 전체에서 고른다(폴백 — 줄 단위
     /// 재추첨이 마무리한다). 하나도 안 걸러지면 원래 목록 그대로라 난수 소비도 필터가 없을 때와 같다.</param>
     private static AlternativeGroup PickGroup(
         AlternativeSlot alt, IRandomSource rnd, AlternativeGroup? avoid = null,
-        LocalFilter? local = null, HashSet<string>? lineKeys = null)
+        LocalFilter? local = null, List<string>? filteredOut = null)
     {
         IReadOnlyList<AlternativeGroup> groups = alt.Groups;
-        if (local != null && lineKeys != null)
+        if (local != null)
         {
-            var ok = alt.Groups.Where(g => g.Weight > 0 && local.Allows(lineKeys, g)).ToList();
+            var ok = alt.Groups.Where(g => g.Weight > 0 && local.Allows(g)).ToList();
             int viableCount = alt.Groups.Count(g => g.Weight > 0);
-            if (ok.Count > 0 && ok.Count < viableCount) groups = ok;
+            if (ok.Count > 0 && ok.Count < viableCount)
+            {
+                groups = ok;
+                if (filteredOut != null)
+                    foreach (var g in alt.Groups)
+                        if (g.Weight > 0 && !ok.Contains(g)) filteredOut.Add(GroupDisplayName(alt, g));
+            }
         }
 
         var picked = PickGroupOnce(groups, rnd);
@@ -622,6 +767,10 @@ public sealed class WildcardGenerator
 
         return picked;
     }
+
+    /// <summary>출처 표시용 그룹 이름: 라벨, 비어 있으면 "그룹 N"(1부터).</summary>
+    internal static string GroupDisplayName(AlternativeSlot alt, AlternativeGroup group) =>
+        string.IsNullOrWhiteSpace(group.Label) ? $"그룹 {alt.Groups.IndexOf(group) + 1}" : group.Label;
 
     /// <summary>대안 그룹 하나를 가중치에 비례해 선택한다(반복 회피 없는 원본 로직). 모든
     /// 가중치가 기본값 1이면 기존과 똑같은 균등 추첨이 된다(하위 호환). 가중치 0인 그룹은
@@ -648,32 +797,53 @@ public sealed class WildcardGenerator
     }
 
     /// <summary>슬롯 단위 로컬 필터(<see cref="GenerationOptions.LocalConflictFiltering"/>)의 상태.
-    /// Generate 호출 하나 동안만 살며, 후보·그룹별 판정 키 집합을 캐시한다 — 같은 후보를 줄마다
-    /// 다시 분해하지 않으려고.</summary>
+    /// Generate 호출 하나 동안만 산다(스레드 하나 전용). 지금 줄에 확정된 판정 키를 규칙 상태와 함께 증분으로
+    /// 추적하고(<see cref="ConflictRules.LineTracker"/>), 후보·그룹별로 "건드리는 규칙"을 캐시한다 — 같은 후보를
+    /// 줄마다 다시 분해하지 않으려고.</summary>
     internal sealed class LocalFilter
     {
         private readonly ConflictRules _rules;
-        private readonly Dictionary<string, HashSet<string>> _candidateKeys = new(StringComparer.Ordinal);
-        private readonly Dictionary<AlternativeGroup, HashSet<string>> _groupKeys = new(ReferenceEqualityComparer.Instance);
+        private readonly ConflictRules.LineTracker _line;
+        private readonly Dictionary<string, (HashSet<string> Keys, ConflictRules.Candidate Rules)> _candidates = new(StringComparer.Ordinal);
+        private readonly Dictionary<AlternativeGroup, ConflictRules.Candidate> _groups = new(ReferenceEqualityComparer.Instance);
 
-        public LocalFilter(ConflictRules rules) => _rules = rules;
-
-        public HashSet<string> KeysOf(string candidate)
+        public LocalFilter(ConflictRules rules)
         {
-            if (!_candidateKeys.TryGetValue(candidate, out var keys))
-                _candidateKeys[candidate] = keys = TagKey.KeySet(new[] { candidate });
-            return keys;
+            _rules = rules;
+            _line = rules.NewLineTracker();
         }
 
-        public HashSet<string> KeysOf(AlternativeGroup group)
+        private (HashSet<string> Keys, ConflictRules.Candidate Rules) Of(string candidate)
         {
-            if (!_groupKeys.TryGetValue(group, out var keys))
-                _groupKeys[group] = keys = TagKey.KeySet(group.Tags);
-            return keys;
+            if (!_candidates.TryGetValue(candidate, out var entry))
+            {
+                var keys = TagKey.KeySet(new[] { candidate });
+                _candidates[candidate] = entry = (keys, _rules.Prepare(keys));
+            }
+            return entry;
         }
 
-        public bool Allows(HashSet<string> lineKeys, string candidate) => !_rules.Introduces(lineKeys, KeysOf(candidate));
-        public bool Allows(HashSet<string> lineKeys, AlternativeGroup group) => !_rules.Introduces(lineKeys, KeysOf(group));
+        private ConflictRules.Candidate Of(AlternativeGroup group)
+        {
+            if (!_groups.TryGetValue(group, out var c))
+                _groups[group] = c = _rules.Prepare(TagKey.KeySet(group.Tags));
+            return c;
+        }
+
+        /// <summary>새 줄(재추첨 포함)을 시작한다.</summary>
+        public void BeginLine() => _line.BeginLine();
+
+        /// <summary>줄에 실제로 들어간 판정 키 하나.</summary>
+        public void Add(string key) => _line.Add(key);
+
+        /// <summary>후보 하나의 판정 키를 전부 줄에 더한다(풀 슬롯이 한 슬롯에서 여러 개를 뽑는 동안).</summary>
+        public void AddCandidate(string candidate) => _line.AddRange(Of(candidate).Keys);
+
+        public (int, int) Mark() => _line.Mark();
+        public void Rollback((int, int) mark) => _line.Rollback(mark);
+
+        public bool Allows(string candidate) => !_line.Introduces(Of(candidate).Rules);
+        public bool Allows(AlternativeGroup group) => !_line.Introduces(Of(group));
     }
 
     /// <summary>후보 목록 전체의 추첨 가중치(같은 순서).

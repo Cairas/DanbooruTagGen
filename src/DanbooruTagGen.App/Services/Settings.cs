@@ -27,6 +27,33 @@ public sealed class Settings
     /// <summary>일괄 생성을 레시피마다 별도 파일로 쓸지(출력 경로의 폴더에 "레시피 이름.txt").
     /// 기본 꺼짐 — 예전처럼 한 파일로 이어붙인다.</summary>
     public bool SplitFilesPerRecipe { get; set; }
+    /// <summary>서로 다른 줄이 바닥나면 요청 줄 수를 못 채워도 멈춘다(중복 줄을 넣지 않음, GenerationOptions.StopWhenExhausted). 기본 켜짐.</summary>
+    public bool StopWhenExhausted { get; set; } = true;
+    /// <summary>생성할 때마다 결과 크게 보기 창을 자동으로 연다. 기본 꺼짐(매번 뜨면 번거롭다).</summary>
+    public bool AutoOpenResults { get; set; }
+    /// <summary>생성 카드의 '토큰 기준': 모델과 숫자(0 = 모델 기본값). 지난번 고른 출력 프로필 이름(콤보 복원용).</summary>
+    public Core.Tokenization.ModelKind OutputModel { get; set; } = Core.Tokenization.ModelKind.IL;
+    public int OutputTokenLimit { get; set; }
+    public string LastOutputProfileName { get; set; } = "";
+    /// <summary>개발 모드(AppPaths.DevMode): 프리셋·규칙을 저장소 data/에서 직접 읽는다. 다음 실행부터 적용.</summary>
+    public bool DevModeReadRepoData { get; set; }
+    /// <summary>레시피를 마지막으로 생성·불러오기에 쓴 시각(라이브러리 "최근 사용순" 정렬).</summary>
+    public Dictionary<string, DateTime> RecipeLastUsed { get; set; } = new();
+    /// <summary>레시피 라이브러리 정렬 방식·분류별 묶기.</summary>
+    public string RecipeSortMode { get; set; } = "";
+    public bool RecipeGroupByCategory { get; set; }
+    /// <summary>일괄 생성에서 레시피별로 따로 정한 줄 수(레시피 id → 줄 수). 없으면 생성 탭의 '줄 수'.</summary>
+    public Dictionary<string, int> BatchLineCounts { get; set; } = new();
+    /// <summary>출력 프로필(모델별 출력 설정 묶음).</summary>
+    public List<OutputProfile> OutputProfiles { get; set; } = new();
+    /// <summary>메인 창 위치·크기·최대화와 좌우 칸 너비(0 이하 = 아직 저장 안 됨 → XAML 기본값).</summary>
+    public double MainWindowLeft { get; set; } = double.NaN;
+    public double MainWindowTop { get; set; } = double.NaN;
+    public double MainWindowWidth { get; set; }
+    public double MainWindowHeight { get; set; }
+    public bool MainWindowMaximized { get; set; }
+    public double MainLeftColumnWidth { get; set; }
+    public double MainRightColumnWidth { get; set; }
 
     /// <summary>매 줄 맨 앞에 품질/안전 등급 태그를 붙일지. 기본 꺼짐 — 이미 자기만의
     /// 품질 태그를 ComfyUI 쪽에서 따로 쓰는 사용자를 위한 옵트인. 이 기능이 있는 이유는
@@ -40,6 +67,9 @@ public sealed class Settings
     /// <summary>한 번이라도 사용자 데이터에 주입한 번들 프리셋 id 목록(PresetSeeder).
     /// 여기 있는 프리셋은 사용자가 지워도 다시 살아나지 않는다 — 삭제도 커스텀이므로.</summary>
     public List<string> SeededPresetIds { get; set; } = new();
+
+    /// <summary>프리셋 갱신으로 새로 들어왔거나(🆕) 바뀐(✏️) 레시피 id → 표시. 라이브러리에서 그 레시피를 열면 지운다.</summary>
+    public Dictionary<string, Core.Persistence.RecipeChangeMark> RecipeChangeMarks { get; set; } = new();
 
     /// <summary>즐겨찾기한 태그명(⭐). 태그 검색의 "⭐ 즐겨찾기" 카테고리가 이 목록을 보여준다.</summary>
     public List<string> FavoriteTags { get; set; } = new();

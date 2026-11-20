@@ -17,17 +17,37 @@ public sealed class TagDatabase : ITagLookup
     private TagDatabase(Tag[] tags)
     {
         Count = tags.Length;
-        _byName = tags
-            .Select(t => (Key: Normalize(t.Name), Tag: t))
-            .OrderBy(x => x.Key, StringComparer.Ordinal)
-            .ToArray();
-        _byAlias = tags
-            .SelectMany(t => t.Aliases.Select(a => (Key: Normalize(a), Tag: t)))
-            .OrderBy(x => x.Key, StringComparer.Ordinal)
-            .ToArray();
-        // 같은 이름이 중복되면 먼저 온 것을 유지(LoadFromFiles가 이미 이름 단위 병합하므로 보통 유일).
-        _exactByName = new Dictionary<string, Tag>(tags.Length, StringComparer.OrdinalIgnoreCase);
-        foreach (var t in tags) _exactByName[t.Name] = t;
+        (string Key, Tag Tag)[] byName = null!, byAlias = null!;
+        Dictionary<string, Tag> exact = null!;
+        // 셋은 서로 독립이라 같이 만든다(앱 시작 시간의 큰 몫이 태그 사전이다).
+        Parallel.Invoke(
+            () => byName = SortedStable(tags.Select(t => (Normalize(t.Name), t))),
+            () => byAlias = SortedStable(tags.SelectMany(t => t.Aliases.Select(a => (Normalize(a), t)))),
+            () =>
+            {
+                // 같은 이름이 중복되면 먼저 온 것을 유지(LoadFromFiles가 이미 이름 단위 병합하므로 보통 유일).
+                exact = new Dictionary<string, Tag>(tags.Length, StringComparer.OrdinalIgnoreCase);
+                foreach (var t in tags) exact[t.Name] = t;
+            });
+        _byName = byName;
+        _byAlias = byAlias;
+        _exactByName = exact;
+    }
+
+    /// <summary>키 기준 안정 정렬(같은 키는 들어온 순서 유지 — 예전 OrderBy와 같은 결과). Array.Sort는 불안정이라 원래 순번을 2차 키로 쓴다.</summary>
+    private static (string Key, Tag Tag)[] SortedStable(IEnumerable<(string Key, Tag Tag)> items)
+    {
+        var arr = items.ToArray();
+        var order = new int[arr.Length];
+        for (int i = 0; i < order.Length; i++) order[i] = i;
+        Array.Sort(order, (a, b) =>
+        {
+            int c = string.CompareOrdinal(arr[a].Key, arr[b].Key);
+            return c != 0 ? c : a.CompareTo(b);
+        });
+        var result = new (string Key, Tag Tag)[arr.Length];
+        for (int i = 0; i < order.Length; i++) result[i] = arr[order[i]];
+        return result;
     }
 
     /// <summary>정확한 이름으로 태그를 조회한다(ITagLookup). 없으면 null.</summary>
@@ -54,16 +74,27 @@ public sealed class TagDatabase : ITagLookup
     /// 한국어 별칭 등을 보강). UTF-8(한/일/중 별칭 보존).</summary>
     public static TagDatabase LoadFromFiles(IEnumerable<string> csvPaths)
     {
-        var byName = new Dictionary<string, Tag>(StringComparer.Ordinal);
-        foreach (var path in csvPaths)
+        // 파일 파싱은 서로 독립이라 병렬로 하고, 병합만 원래 파일 순서대로 한다(먼저 온 파일 우선 규칙이 그대로다).
+        var paths = csvPaths.Where(File.Exists).ToList();
+        var parsed = new List<Tag>[paths.Count];
+        Parallel.For(0, paths.Count, i =>
         {
-            if (!File.Exists(path)) continue;
             // 파일명에 nsfw가 들어가면 성인 큐레이션 파일로 간주(ko-nsfw.csv).
-            bool fileIsNsfw = Path.GetFileName(path).Contains("nsfw", StringComparison.OrdinalIgnoreCase);
-            foreach (var line in File.ReadLines(path, Encoding.UTF8))
+            bool fileIsNsfw = Path.GetFileName(paths[i]).Contains("nsfw", StringComparison.OrdinalIgnoreCase);
+            var list = new List<Tag>();
+            foreach (var line in File.ReadLines(paths[i], Encoding.UTF8))
             {
                 if (!CsvTagParser.TryParseLine(line, out var tag)) continue;
-                if (fileIsNsfw && !tag.IsNsfw) tag = tag with { IsNsfw = true };
+                list.Add(fileIsNsfw && !tag.IsNsfw ? tag with { IsNsfw = true } : tag);
+            }
+            parsed[i] = list;
+        });
+
+        var byName = new Dictionary<string, Tag>(StringComparer.Ordinal);
+        foreach (var list in parsed)
+        {
+            foreach (var tag in list)
+            {
                 if (byName.TryGetValue(tag.Name, out var existing))
                 {
                     // 카테고리/빈도는 첫 파일 유지, 별칭은 합집합, 설명은 먼저 채워진 것 유지, nsfw는 OR

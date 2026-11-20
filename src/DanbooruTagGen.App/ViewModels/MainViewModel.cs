@@ -12,6 +12,59 @@ namespace DanbooruTagGen.App.ViewModels;
 public sealed partial class MainViewModel : ObservableObject
 {
     [ObservableProperty] private string _status = "준비됨";
+    /// <summary>파일 감시 상태(도구 메뉴에 표시).</summary>
+    [ObservableProperty] private string _watchStateText = "";
+    /// <summary>마지막 프리셋 갱신 시각(상태 표시줄).</summary>
+    [ObservableProperty] private string _lastSyncText = "";
+    /// <summary>마지막 번들 프리셋 읽기가 실패했으면 그 이유(성공하면 지운다). 상태 메시지와 달리 고칠 때까지 남는다.</summary>
+    [ObservableProperty] private string _presetLoadError = "";
+
+    /// <summary>메인 창 탭: 0 = 일괄 생성(기본), 1 = 레시피 편집. 생성 카드의 대상이 탭을 따라간다(일괄 = 체크한 레시피, 편집 = 빌더 구성).</summary>
+    [ObservableProperty] private int _selectedTabIndex;
+
+    partial void OnSelectedTabIndexChanged(int value)
+    {
+        if (Generation is { } g) g.IsMultiRecipeMode = value == 0;
+    }
+
+    /// <summary>레시피 편집 탭으로(불러오기·컨셉 빌더 보내기 뒤).</summary>
+    public void ShowEditTab() => SelectedTabIndex = 1;
+
+    /// <summary>지운 제공 팩 창(도구 ▾).</summary>
+    [RelayCommand]
+    private void OpenDeletedPresets() =>
+        new Views.DeletedPresetsWindow(this) { Owner = System.Windows.Application.Current.MainWindow }.Show();
+
+    private Views.LogWindow? _logWindow;
+
+    /// <summary>문제 로그 창(도구 ▾ → 로그…). 예전 '상태 기록'(📜)을 대신한다 — 평범한 상태 문장은 남기지 않고 문제만.</summary>
+    [RelayCommand]
+    private void OpenLog()
+    {
+        if (_logWindow != null) { _logWindow.Activate(); return; }
+        var win = new Views.LogWindow() { Owner = System.Windows.Application.Current.MainWindow };
+        _logWindow = win;
+        win.Closed += (_, _) => _logWindow = null;
+        win.Show();
+    }
+
+    /// <summary>개발 모드 켜기/끄기(다음 실행부터). 상태 표시줄 체크박스.</summary>
+    public bool DevModeSetting
+    {
+        get => Settings.DevModeReadRepoData;
+        set
+        {
+            if (Settings.DevModeReadRepoData == value) return;
+            Settings.DevModeReadRepoData = value;
+            SettingsStore.Save(Settings);
+            OnPropertyChanged();
+            Status = value == AppPaths.DevMode
+                ? (value ? "개발 모드 켜짐(이미 적용 중)." : "개발 모드 꺼짐.")
+                : (value ? "개발 모드: 다음 실행부터 저장소의 data/를 직접 읽습니다." : "개발 모드: 다음 실행부터 exe 옆 data/를 읽습니다.");
+        }
+    }
+
+    public bool DevModeAvailable => AppPaths.RepoRoot != null;
     [ObservableProperty] private bool _isLoading = true;
 
     public Settings Settings { get; }
@@ -48,6 +101,11 @@ public sealed partial class MainViewModel : ObservableObject
     public MainViewModel()
     {
         AppPaths.EnsureAppDataDir();
+        // 그날 첫 실행이면 손대기 전(시딩 전) 상태를 백업한다. 백업 실패로 앱 시작이 막히면 안 된다.
+        TryBackup(() => BackupStore.CreateDailyIfMissing(AppPaths.AppDataDir, AppPaths.BackupsDir, DateTime.Now));
+        // 문제 로그: 7일 지난 파일을 지우고, 쓰기 실패는 상태 표시줄로.
+        AppLog.Log.Prune(DateTime.Now);
+        AppLog.WriteFailed += message => Status = message;
         Settings = SettingsStore.Load();
         Pools = PoolStore.Load(AppPaths.PoolsFile);
         SavedRecipes = RecipeLibraryStore.Load(AppPaths.RecipesFile);
@@ -66,11 +124,164 @@ public sealed partial class MainViewModel : ObservableObject
         if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out var error))
         {
             Status = "번들 프리셋을 읽지 못해 시딩을 건너뜁니다 — " + error;
+            AppLog.Program("번들 프리셋 읽기 실패(시작)", error);
+            PresetLoadError = "⚠ 번들 읽기 실패: " + error;
             return;
         }
         var seeded = new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal);
+        var idsBefore = SavedRecipes.Select(r => r.Id).ToList();
+        // 처음 설치(장부가 빔)면 전부가 새것이라 🆕 표시가 의미 없다 — 표시는 그 다음 실행부터.
+        bool firstInstall = Settings.SeededPresetIds.Count == 0;
+        RecipeChangeTracker.Prune(Settings.RecipeChangeMarks, idsBefore, DateTime.Now);
         if (PresetSeeder.Seed(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded))
+        {
+            if (!firstInstall) RecipeChangeTracker.MarkNew(Settings.RecipeChangeMarks, idsBefore, SavedRecipes, DateTime.Now);
             CommitSeeding(seeded);
+        }
+    }
+
+    /// <summary>백업을 만들고 오래된 것을 정리한다. 실패(디스크·권한)는 상태 표시줄에만 남긴다 — 백업 때문에 본 작업이 막히면 안 된다.
+    /// 반환: 백업이 실제로 만들어졌는가.</summary>
+    private bool TryBackup(Func<string?> create)
+    {
+        try
+        {
+            var made = create() != null;
+            BackupStore.Prune(AppPaths.BackupsDir);
+            return made;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.IO.InvalidDataException)
+        {
+            Status = "⚠ 자동 백업 실패 — " + ex.Message;
+            AppLog.Exception("자동 백업 실패", ex);
+            return false;
+        }
+    }
+
+    /// <summary>지금 상태 스냅샷(위험 작업 직전). 반환: 만들어졌는가.</summary>
+    public bool Snapshot(string label) =>
+        TryBackup(() => BackupStore.CreateSnapshot(AppPaths.AppDataDir, AppPaths.BackupsDir, label, DateTime.Now));
+
+    private Views.BackupWindow? _backupWindow;
+
+    [RelayCommand]
+    private void OpenBackups()
+    {
+        if (_backupWindow != null) { _backupWindow.Activate(); return; }
+        var win = new Views.BackupWindow(this) { Owner = System.Windows.Application.Current.MainWindow };
+        _backupWindow = win;
+        win.Closed += (_, _) => _backupWindow = null;
+        win.Show();
+    }
+
+    /// <summary>백업 시점으로 되돌린다: 다른 창을 닫고(각 창의 자동 저장이 지금 끝나게) → 지금 상태를 "복원 전"으로 스냅샷 →
+    /// 파일을 되돌리고 → 쓰기를 얼린 채(AppWriteGuard) 앱을 다시 시작한다. 메모리의 옛 상태로 다시 덮어쓰지 않으려고 재시작한다.</summary>
+    public void RestoreBackup(BackupEntry entry)
+    {
+        var ok = System.Windows.MessageBox.Show(
+            $"{entry.Time:yyyy-MM-dd HH:mm} · {entry.Label}\n\n이 시점의 레시피·풀·훅·설정으로 되돌리고 앱을 다시 시작합니다.\n" +
+            "지금 상태는 '복원 전' 백업으로 먼저 남겨 두므로, 잘못 골랐으면 그걸로 다시 되돌릴 수 있습니다.\n\n계속할까요?",
+            "백업 복원", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Warning);
+        if (ok != System.Windows.MessageBoxResult.OK) return;
+
+        var app = System.Windows.Application.Current;
+        foreach (var w in app.Windows.OfType<System.Windows.Window>().Where(w => w != app.MainWindow).ToList()) w.Close();
+        // 창 닫기 저장이 끝난 뒤의 상태가 "지금 상태"다.
+        if (app.MainWindow is MainWindow main) main.SaveOnClose();
+        if (!Snapshot("복원 전"))
+        {
+            System.Windows.MessageBox.Show("지금 상태를 백업하지 못해 복원을 멈췄습니다. " + Status, "백업 복원",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            return;
+        }
+        AppWriteGuard.Freeze();
+        try { BackupStore.Restore(entry.Path, AppPaths.AppDataDir); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.IO.InvalidDataException)
+        {
+            System.Windows.MessageBox.Show("복원 중 오류: " + ex.Message + "\n\n앱을 닫습니다. '복원 전' 백업이 남아 있으니 다시 실행해 백업 창에서 되돌릴 수 있습니다.",
+                "백업 복원", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+            app.Shutdown();
+            return;
+        }
+        try
+        {
+            if (Environment.ProcessPath is { } exe) System.Diagnostics.Process.Start(exe);
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            System.Windows.MessageBox.Show("복원했습니다. 앱을 다시 실행해 주세요.", "백업 복원");
+        }
+        app.Shutdown();
+    }
+
+    /// <summary>한 번 시딩됐다가 사용자가 지운 제공 팩(번들에는 아직 있음). 장부(seededIds)가 기억해서 다시는 저절로 안 들어온다.
+    /// 번들을 못 읽으면 null.</summary>
+    public IReadOnlyList<Recipe>? DeletedBundledRecipes(out string error)
+    {
+        if (!BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var bundled, out error)) return null;
+        var present = SavedRecipes.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var presentNames = SavedRecipes.Select(r => r.Name).ToHashSet(StringComparer.Ordinal);
+        var seeded = new HashSet<string>(Settings.SeededPresetIds, StringComparer.Ordinal);
+        // 이름이 같은 사본이 있으면(id 도입 전 설치본 등) 지운 게 아니다 — PresetSeeder.Seed와 같은 기준.
+        return bundled.Recipes.Where(r => seeded.Contains(r.Id) && !present.Contains(r.Id) && !presentNames.Contains(r.Name)).ToList();
+    }
+
+    /// <summary>지운 제공 팩을 다시 넣는다(목록 맨 뒤, 🆕 표시). 장부는 그대로(이미 시딩된 것).</summary>
+    public int RestoreBundledRecipes(IEnumerable<Recipe> recipes)
+    {
+        int n = 0;
+        var now = DateTime.Now;
+        foreach (var r in recipes)
+        {
+            if (SavedRecipes.Any(s => s.Id == r.Id)) continue;
+            SavedRecipes.Add(r);
+            Settings.RecipeChangeMarks[r.Id] = new RecipeChangeMark { Kind = RecipeChangeKind.New, At = now };
+            n++;
+        }
+        if (n == 0) return 0;
+        SaveRecipeLibrary();
+        SettingsStore.Save(Settings);
+        RecipeLibrary?.Refresh();
+        Generation?.RefreshBatchRecipes();
+        Status = $"지운 제공 팩 {n}개를 다시 넣었습니다(라이브러리에 🆕로 표시).";
+        return n;
+    }
+
+    /// <summary>레시피를 썼다(생성·불러오기) — 라이브러리 "최근 사용순" 정렬용. 설정은 앱을 닫을 때 저장된다.</summary>
+    public void MarkRecipesUsed(IEnumerable<string?> ids)
+    {
+        var now = DateTime.Now;
+        foreach (var id in ids)
+            if (!string.IsNullOrEmpty(id)) Settings.RecipeLastUsed[id] = now;
+    }
+
+    /// <summary>레시피 버전을 남긴다(열 때·고칠 때·프리셋 갱신 전후). 같은 내용이면 건너뛰고, 짧은 연속 편집은 합친다.
+    /// 실패해도 본 작업을 막지 않는다(상태 표시줄에만).</summary>
+    public void RecordRecipeVersion(Recipe recipe, string reason) =>
+        RecordRecipeVersion(RecipeHistoryStore.Serialize(recipe), recipe.Id, recipe.Name, reason);
+
+    /// <summary>미리 직렬화해 둔 내용(선택할 때 잡아 둔 "고치기 전")을 버전으로 남긴다.</summary>
+    public void RecordRecipeVersion(string recipeJson, string recipeId, string recipeName, string reason)
+    {
+        if (AppWriteGuard.Frozen) return;
+        try { RecipeHistoryStore.Record(AppPaths.HistoryDir, recipeJson, recipeId, reason, DateTime.Now); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Status = "⚠ 레시피 버전 기록 실패 — " + ex.Message;
+            AppLog.Exception($"레시피 버전 기록 실패 — {recipeName}", ex);
+        }
+    }
+
+    /// <summary>목록 배지(🆕 새로 들어옴 / ✏️ 바뀜, 아직 안 열어 본 것만).</summary>
+    public string ChangeBadgeOf(string id) => RecipeChangeTracker.Badge(Settings.RecipeChangeMarks, id);
+
+    /// <summary>레시피를 열어 봤다 — 🆕/✏️ 표시를 지운다(설정은 앱을 닫을 때 저장된다). 반환: 표시가 있었는가.</summary>
+    public bool MarkRecipeSeen(string id) => Settings.RecipeChangeMarks.Remove(id);
+
+    public void ClearRecipeChangeMarks()
+    {
+        Settings.RecipeChangeMarks.Clear();
+        SettingsStore.Save(Settings);
     }
 
     /// <summary>시딩 결과를 디스크에 쓴다. <b>순서가 중요하다</b> — 실제 데이터(풀·레시피)를
@@ -91,9 +302,13 @@ public sealed partial class MainViewModel : ObservableObject
         IsLoading = true;
         Status = "태그 데이터 로드 중...";
         var csvPaths = SettingsStore.ResolveCsvPaths(Settings);
-        var db = await Task.Run(() => TagDatabase.LoadFromFiles(csvPaths));
-        Conflicts = await Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
-        Requires = await Task.Run(() => Core.Generation.RequiresRules.LoadFromFileOrDefault(AppPaths.RequiresFile));
+        // 셋은 서로 독립이라 같이 읽는다(예전엔 차례로 읽어 태그 사전 + 규칙 시간이 그대로 더해졌다).
+        var dbTask = Task.Run(() => TagDatabase.LoadFromFiles(csvPaths));
+        var conflictsTask = Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
+        var requiresTask = Task.Run(() => Core.Generation.RequiresRules.LoadFromFileOrDefault(AppPaths.RequiresFile));
+        var db = await dbTask;
+        Conflicts = await conflictsTask;
+        Requires = await requiresTask;
         TagInfo = db;
         TagDb = db;
 
@@ -110,6 +325,8 @@ public sealed partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(RecipeLibrary));
         OnPropertyChanged(nameof(Generation));
         OnPropertyChanged(nameof(HookLibrary));
+        // 일괄 생성 탭으로 시작한다(생성 대상 = 체크한 레시피).
+        Generation.IsMultiRecipeMode = SelectedTabIndex == 0;
 
         IsLoading = false;
         Status = $"태그 {db.Count:N0}개 로드됨";
@@ -157,6 +374,21 @@ public sealed partial class MainViewModel : ObservableObject
         _rulesWatcher.Created += OnChanged;
         _rulesWatcher.Renamed += OnChanged;
         _rulesWatcher.EnableRaisingEvents = true;
+        _rulesWatcher.Error += (_, e) => System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+        {
+            Status = "⚠ 규칙 파일 감시가 멈췄습니다 — 앱을 다시 시작하세요: " + e.GetException().Message;
+            AppLog.Exception("규칙 파일 감시 멈춤", e.GetException());
+        });
+        RefreshWatchState();
+    }
+
+    private void RefreshWatchState()
+    {
+        var parts = new List<string>();
+        if (_presetWatcher != null) parts.Add("프리셋");
+        if (_rulesWatcher != null) parts.Add("규칙");
+        WatchStateText = (parts.Count == 0 ? "⚠ 파일 감시 꺼짐" : "👁 " + string.Join("·", parts) + " 감시 중")
+            + (AppPaths.DevMode ? " (저장소 data)" : " (exe 옆 data)");
     }
 
     private async void ReloadRules()
@@ -178,6 +410,8 @@ public sealed partial class MainViewModel : ObservableObject
             // 파일을 쓰는 중이면 읽기에 실패할 수 있다 — 기존 규칙을 유지하고 다음 변경 이벤트에서 다시 시도한다.
             // 다만 조용히 넘기면 "고쳤는데 왜 반영이 안 되지"가 되므로 이유는 남긴다.
             Status = "모순 규칙을 다시 읽지 못해 기존 규칙을 유지합니다(파일을 다시 저장하면 재시도) — " + ex.Message;
+            // 파일 잠금(IOException)은 편집기가 쓰는 도중에 늘 생기는 일시적 실패라 로그에 안 남긴다 — 내용 오류만 남긴다.
+            if (ex is not IOException) AppLog.Exception("모순 규칙 다시 읽기 실패", ex);
         }
     }
 
@@ -237,13 +471,20 @@ public sealed partial class MainViewModel : ObservableObject
             _presetWatcher.Deleted += OnChanged;
             _presetWatcher.Renamed += OnChanged;
             _presetWatcher.EnableRaisingEvents = true;
+            _presetWatcher.Error += (_, e) => System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+            {
+                Status = "⚠ 프리셋 폴더 감시가 멈췄습니다 — ⚡ 퀵 갱신을 누르거나 앱을 다시 시작하세요: " + e.GetException().Message;
+                AppLog.Exception("프리셋 폴더 감시 멈춤", e.GetException());
+            });
         }
+        RefreshWatchState();
     }
 
-    public void SavePools() => PoolStore.Save(Pools, AppPaths.PoolsFile);
-    public void SaveRecipeLibrary() => RecipeLibraryStore.Save(SavedRecipes, AppPaths.RecipesFile);
-    public void SaveHooks() => HookStore.Save(Hooks, AppPaths.HooksFile);
-    public void SaveBatchPresets() => BatchPresetStore.Save(BatchPresets, AppPaths.BatchPresetsFile);
+    // 백업 복원 후 재시작 중(AppWriteGuard)이면 아무것도 안 쓴다 — 방금 되돌린 파일을 옛 상태로 덮어쓰지 않게.
+    public void SavePools() { if (!AppWriteGuard.Frozen) PoolStore.Save(Pools, AppPaths.PoolsFile); }
+    public void SaveRecipeLibrary() { if (!AppWriteGuard.Frozen) RecipeLibraryStore.Save(SavedRecipes, AppPaths.RecipesFile); }
+    public void SaveHooks() { if (!AppWriteGuard.Frozen) HookStore.Save(Hooks, AppPaths.HooksFile); }
+    public void SaveBatchPresets() { if (!AppWriteGuard.Frozen) BatchPresetStore.Save(BatchPresets, AppPaths.BatchPresetsFile); }
 
     /// <summary>seededIds(=한 번이라도 번들에서 주입한 id) 조회용 캐시. 라이브러리 목록을
     /// 채울 때 레시피마다 조회하므로 List.Contains(O(n))로 두면 700×200번 훑게 된다.
@@ -273,16 +514,29 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
+        // 미리 돌려 보고(사본) 무엇이 바뀌는지 이름으로 보여 준다 — 예전엔 일반 안내문뿐이라 무엇이 지워질지 몰랐다.
+        var (added, replaced, removed, poolChanges) = PresetSeeder.Preview(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, Settings.SeededPresetIds);
+        if (added.Count == 0 && replaced.Count == 0 && removed.Count == 0 && poolChanges == 0)
+        {
+            System.Windows.MessageBox.Show("바뀔 것이 없습니다 — 라이브러리가 이미 번들과 같습니다.", "프리셋 갱신",
+                System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
+            return;
+        }
+        static string Names(IReadOnlyList<string> names) =>
+            names.Count == 0 ? "없음" : string.Join("\n    ", names.Take(12)) + (names.Count > 12 ? $"\n    … 외 {names.Count - 12}개" : "");
         var ok = System.Windows.MessageBox.Show(
             "프로그램 제공 축 풀·컨셉 팩을 최신 내용으로 갱신합니다.\n\n" +
-            "· 아직 설치되지 않은 새 팩은 추가됩니다.\n" +
-            "· 직접 만든 풀·레시피는 그대로 둡니다.\n" +
-            "· 예전에 설치됐다가 이번 업데이트로 번들에서 완전히 빠진 팩은 라이브러리에서도 같이 제거됩니다.\n" +
-            "· 제공 팩을 직접 수정했다면 그 수정은 덮어써집니다.\n\n계속할까요?",
-            "프리셋 갱신", System.Windows.MessageBoxButton.OKCancel, System.Windows.MessageBoxImage.Question);
+            $"➕ 추가 {added.Count}개:\n    {Names(added)}\n\n" +
+            $"✏️ 내용 교체 {replaced.Count}개(이 팩을 앱에서 고쳤다면 그 수정은 덮어써집니다 — 고치기 전 버전은 🕘 버전에 남습니다):\n    {Names(replaced)}\n\n" +
+            $"🗑 제거 {removed.Count}개(번들에서 완전히 빠진 팩):\n    {Names(removed)}\n\n" +
+            (poolChanges > 0 ? $"축 풀 변경 {poolChanges}개\n\n" : "") +
+            "직접 만든 풀·레시피는 그대로 둡니다. 갱신 직전 상태는 🗄 백업에 스냅샷으로 남습니다.\n\n계속할까요?",
+            "프리셋 갱신", System.Windows.MessageBoxButton.OKCancel,
+            removed.Count > 0 ? System.Windows.MessageBoxImage.Warning : System.Windows.MessageBoxImage.Question);
         if (ok != System.Windows.MessageBoxResult.OK) return;
 
-        ApplyBundledSync(bundled);
+        Snapshot("프리셋 갱신 전");
+        ApplyBundledSync(bundled, alreadyBackedUp: true);
         System.Windows.MessageBox.Show(Status, "프리셋 갱신",
             System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Information);
     }
@@ -332,26 +586,49 @@ public sealed partial class MainViewModel : ObservableObject
                 return;
             }
             Status = "프리셋 갱신 실패(파일을 고쳐 저장하면 자동으로 다시 시도) — " + error;
+            AppLog.Program("번들 프리셋 읽기 실패(자동 갱신)", error + "\n기존 데이터는 그대로 두고 건너뜀. 파일을 고쳐 저장하면 자동으로 다시 읽음.");
+            PresetLoadError = "⚠ 번들 읽기 실패: " + error;
             return;
         }
         _presetSyncRetry.OnSucceeded();
+        PresetLoadError = "";
         ApplyBundledSync(bundled, removalLimit: MaxAutoRemovals);
     }
 
     /// <summary>Seed+SyncBundled 실행, 화면 갱신, Status 문구 설정까지 — 확인/완료 UI는 호출부 책임.
     /// <paramref name="removalLimit"/>보다 많이 제거하게 되면 제거만 보류한다(자동 경로용 안전판).</summary>
-    private void ApplyBundledSync(BundledPresets bundled, int removalLimit = int.MaxValue)
+    private void ApplyBundledSync(BundledPresets bundled, int removalLimit = int.MaxValue, bool alreadyBackedUp = false)
     {
+        if (AppWriteGuard.Frozen) return;   // 백업 복원 후 재시작 중
         var previousLedger = Settings.SeededPresetIds.ToList();
         var seeded = new HashSet<string>(previousLedger, StringComparer.Ordinal);
+        var idsBefore = SavedRecipes.Select(r => r.Id).ToList();
         var added = PresetSeeder.Seed(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
         int pendingRemovals = PresetSeeder.CountPendingRemovals(Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded);
         bool holdRemovals = pendingRemovals > removalLimit;
+        // 사용자 데이터에서 무언가 지워질 참이면(번들에서 빠진 팩) 지우기 전 상태를 남긴다.
+        if (pendingRemovals > 0 && !holdRemovals && !alreadyBackedUp) Snapshot($"제거 전 ({pendingRemovals}개)");
         var changedRecipeIds = new HashSet<string>(StringComparer.Ordinal);
+        // 갱신으로 바뀌기 전 내용을 버전으로 남기려고 지금 객체를 잡아 둔다(SyncBundled는 목록 칸을 새 객체로 갈아 끼울 뿐 옛 객체를 고치지 않는다).
+        var beforeSync = new Dictionary<string, Recipe>(StringComparer.Ordinal);
+        foreach (var r in SavedRecipes) beforeSync.TryAdd(r.Id, r);
         var (updated, removed) = PresetSeeder.SyncBundled(
             Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded, allowRemoval: !holdRemovals, changedRecipeIds);
+        int newRecipes = 0;
         if (added || updated > 0 || removed > 0)
         {
+            // 🆕/✏️ 표시: 장부 저장보다 먼저 메모리에 반영해 두고, 장부와 함께(또는 맨 끝에) 저장한다.
+            var now = DateTime.Now;
+            newRecipes = RecipeChangeTracker.MarkNew(Settings.RecipeChangeMarks, idsBefore, SavedRecipes, now);
+            var stillThere = SavedRecipes.Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+            RecipeChangeTracker.MarkUpdated(Settings.RecipeChangeMarks, changedRecipeIds.Where(stillThere.Contains), now);
+            RecipeChangeTracker.Prune(Settings.RecipeChangeMarks, stillThere, now);
+            foreach (var id in changedRecipeIds)
+            {
+                if (beforeSync.TryGetValue(id, out var old)) RecordRecipeVersion(old, "프리셋 갱신 전");
+                if (SavedRecipes.FirstOrDefault(r => r.Id == id) is { } fresh) RecordRecipeVersion(fresh, "프리셋 갱신");
+            }
+
             // 장부(seededIds) 저장 순서는 PresetSeeder.PlanLedgerWrites 참고:
             // 제거분은 데이터보다 먼저 장부에서 빼고, 추가분은 데이터 뒤에 장부에 넣는다.
             var (ledgerBefore, ledgerAfter) = PresetSeeder.PlanLedgerWrites(previousLedger, seeded);
@@ -359,6 +636,7 @@ public sealed partial class MainViewModel : ObservableObject
             SavePools();
             SaveRecipeLibrary();
             if (ledgerAfter != null) SaveLedger(ledgerAfter);
+            else SettingsStore.Save(Settings);   // 장부는 그대로여도 🆕/✏️ 표시는 바뀌었을 수 있다
             // 화면이 옛 객체를 들고 있으면 창을 닫을 때 그 사본이 되쓰여 갱신이 무효가 된다.
             // (뷰모델은 InitializeAsync 뒤에야 생기므로 null 가드)
             RecipeBuilder?.RefreshPools();
@@ -378,8 +656,10 @@ public sealed partial class MainViewModel : ObservableObject
                 if (fresh != null) RecipeBuilder!.LoadRecipe(fresh);
             }
         }
+        LastSyncText = $"프리셋 확인 {DateTime.Now:HH:mm:ss}";
         Status = (added || updated > 0 || removed > 0
                      ? $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}."
+                       + (newRecipes > 0 ? $" 새 레시피 {newRecipes}개는 라이브러리에 🆕로 표시됩니다." : "")
                      : "프리셋 갱신 — 바뀐 항목 없음.")
                  + (holdRemovals
                      ? $" (번들에서 빠진 항목 {pendingRemovals}개는 자동 제거를 보류 — 의도한 삭제면 \"⟳ 프리셋 갱신\"으로 적용)"

@@ -125,6 +125,7 @@ public sealed partial class ConceptWizardViewModel : ObservableObject
 
         var builder = _main.RecipeBuilder;
         builder.RecordSlotsBeforeReplace("컨셉 빌더로 새 구성 만들기");
+        _main.ShowEditTab();
         builder.Slots.Clear();
 
         var baseSlot = new FixedSlot { Label = "기본" };

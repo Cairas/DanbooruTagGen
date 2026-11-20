@@ -17,6 +17,40 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
 
     [ObservableProperty] private Slot? _selectedSlot;
     [ObservableProperty] private string _conflictWarning = "";
+    private IReadOnlyList<Core.Generation.RecipeConflict> _lastConflictHits = Array.Empty<Core.Generation.RecipeConflict>();
+
+    /// <summary>선택한 슬롯만 따로 굴려 본다(후보별 확률·뽑힌 개수·예시). 생성 탭 옵션(빈도 가중 등)을 그대로 쓴다.</summary>
+    [RelayCommand]
+    private void PreviewSelectedSlot()
+    {
+        if (SelectedSlot is not { } slot) { _main.Status = "굴려 볼 슬롯을 먼저 고르세요."; return; }
+        var opts = _main.Generation?.SnapshotOptions() ?? new Core.Models.GenerationOptions();
+        var text = Core.Generation.SlotPreview.Describe(slot, _main.Pools.ToDictionary(p => p.Id), opts, _main.TagInfo);
+        new Views.ReportWindow($"슬롯 굴려 보기 — {slot.Label}", text) { Owner = System.Windows.Application.Current.MainWindow }.Show();
+    }
+
+    /// <summary>모순 경고의 원인 규칙을 conflicts.csv에서 찾아 줄 번호와 함께 보여 준다 — 어느 규칙을 고칠지(또는 의도된 모순인지) 바로 보이게.</summary>
+    [RelayCommand]
+    private void ShowConflictRules()
+    {
+        if (_lastConflictHits.Count == 0) { _main.Status = "지금 구성에는 모순 경고가 없습니다."; return; }
+        var path = AppPaths.ConflictsFile;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"규칙 파일: {path}");
+        sb.AppendLine();
+        foreach (var group in _lastConflictHits.GroupBy(h => h.Label))
+        {
+            var sev = group.Any(h => h.Severity == Core.Generation.ConflictSeverity.Definite) ? "항상" : "가끔";
+            sb.AppendLine($"[{sev}] {group.Key}");
+            foreach (var h in group.Take(8)) sb.AppendLine("    걸린 태그: " + string.Join(" + ", h.Tags));
+            var lines = Core.Generation.ConflictRuleSource.FindLines(path, new[] { group.Key });
+            if (lines.Count == 0) sb.AppendLine("    (같은 라벨의 줄을 못 찾음 — 예산 규칙이거나 라벨이 바뀌었을 수 있습니다)");
+            foreach (var (line, text) in lines.Take(20)) sb.AppendLine($"    {line,6}행: {text}");
+            if (lines.Count > 20) sb.AppendLine($"    … 외 {lines.Count - 20}줄");
+            sb.AppendLine();
+        }
+        new Views.ReportWindow("모순 규칙 보기", sb.ToString().TrimEnd()) { Owner = System.Windows.Application.Current.MainWindow }.Show();
+    }
     [ObservableProperty] private string _varietyWarning = "";
     /// <summary>검색 없이 슬롯에 직접 타이핑해 넣는 입력 칸. 태그 DB에 없는 자연어 구문
     /// 조각(예: "a girl standing in neon-lit rain")도 그대로 들어간다.</summary>
@@ -227,6 +261,7 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     [RelayCommand]
     private void SaveRecipe()
     {
+        if (AppWriteGuard.Frozen) return;   // 백업 복원 후 재시작 중
         AppPaths.EnsureAppDataDir();
         RecipeStore.Save(BuildRecipe(), AppPaths.LastRecipeFile);
         _main.Status = "레시피 저장됨";
@@ -266,11 +301,41 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         // 풀의 looking_up/looking_down)는 하나만 뽑히므로 서로 충돌로 잡히지 않는다.
         // 라이브러리 배지와 같은 기준(SlotSpec.FromSlots)을 써야 두 화면의 경고가 어긋나지 않는다.
         var hits = rules.AnalyzeRecipe(Core.Generation.SlotSpec.FromSlots(Slots, _main.Pools.ToDictionary(p => p.Id)));
+        _lastConflictHits = hits;
         if (hits.Count == 0) { ConflictWarning = ""; return; }
 
         var parts = hits.Select(h =>
             $"[{(h.Severity == Core.Generation.ConflictSeverity.Definite ? "항상" : "가끔")}] {h.Label}: {string.Join(" + ", h.Tags)}");
         ConflictWarning = "⚠ 모순 " + string.Join("  /  ", parts);
+    }
+
+    /// <summary>[지표 재기]: 지금 구성(저장 안 된 것 그대로)을 생성 카드 설정·선택 출력 프로필의 토큰 기준으로 한 번 잰다.
+    /// 예전처럼 편집할 때마다 재지 않는다 — 누를 때만.</summary>
+    [RelayCommand]
+    private async Task MeasureMetrics()
+    {
+        if (_main.Generation is not { } gen) return;
+        if (Slots.Count == 0 || Slots.All(s => !s.IsEnabled)) { _main.Status = "잴 슬롯이 없습니다."; return; }
+        var recipe = Services.RecipeMeasure.Clone(BuildRecipe());
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+        var opts = gen.SnapshotOptions();
+        var (counter, limit) = gen.CurrentTokenRule();
+        var (rules, tags) = (_main.Conflicts, _main.TagInfo);
+        _main.Status = "지표 재는 중…";
+        try
+        {
+            var profile = await Task.Run(() => Core.Generation.RecipeProfiler.Measure(
+                recipe, pools, opts, rules, tags, Services.RecipeMeasure.SampleLines, counter: counter, tokenLimit: limit));
+            var text = Core.Output.RecipeProfileText.Summary(profile) + " · 훅 제외"
+                       + "\n\n이론 조합 = 슬롯 가짓수의 곱(상한). 서로 다른 줄 = 중복 회피 없이 "
+                       + $"{Services.RecipeMeasure.SampleLines:N0}줄 뽑았을 때 나온 종류. 유효 = 가중치 쏠림을 반영한 '사실상 몇 가지'."
+                       + "\n아랫줄은 생성 카드의 줄 수·옵션 그대로 한 번 생성한 결과입니다.";
+            new Views.ReportWindow("지표 — 레시피 빌더의 지금 구성", text)
+                { Owner = System.Windows.Application.Current.MainWindow }.Show();
+            _main.Status = "지표 — " + text.Split('\n')[0];
+        }
+        catch (Core.Generation.GenerationValidationException ex) { _main.Status = "지표를 잴 수 없음 — 검증 오류: " + ex.Message; }
+        catch (InvalidOperationException ex) { _main.Status = "지표 계산 중 오류(다시 시도하세요): " + ex.Message; }
     }
 
     /// <summary>MAJOR 축 조합 수(VarietyAnalyzer, tools/visual_variety_scan.py 포팅)를 지금
