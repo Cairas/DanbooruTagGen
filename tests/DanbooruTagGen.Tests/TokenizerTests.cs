@@ -88,6 +88,27 @@ public class TokenizerTests
         Assert.Contains("(추정)", line);                // Anima 쪽이 어림값
     }
 
+    /// <summary>git(autocrlf)이 merges.txt를 CRLF로 바꿔 받아도 같은 수를 세야 한다.</summary>
+    [Fact]
+    public void CrlfMergesCountTheSame()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "dtg-crlf-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            foreach (var sub in new[] { "clip", "qwen3" })
+            {
+                Directory.CreateDirectory(Path.Combine(tmp, sub));
+                var lf = File.ReadAllText(Path.Combine(TokenizersDir, sub, "merges.txt")).Replace("\r\n", "\n");
+                File.WriteAllText(Path.Combine(tmp, sub, "merges.txt"), lf.Replace("\n", "\r\n"));
+            }
+            const string text = "1girl, solo, long_hair, looking_at_viewer, piledriver_(sex), (blush:1.2), heart-shaped_pupils";
+            foreach (var model in new[] { ModelKind.IL, ModelKind.Anima })
+                Assert.Equal(TokenCounters.CountLine(TokenCounters.For(model, TokenizersDir), text),
+                             TokenCounters.CountLine(TokenCounters.For(model, tmp), text));
+        }
+        finally { try { Directory.Delete(tmp, true); } catch (IOException) { } }
+    }
+
     [Fact]
     public void ChunksOfSeventyFive()
     {

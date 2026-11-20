@@ -44,7 +44,7 @@ internal sealed class BpeTokenCounter : ITokenCounter
         int end = Math.Min(lines.Length, 49152 - 256 - 2 + 1);
         for (int i = 1; i < end; i++)
         {
-            var parts = lines[i].Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var parts = lines[i].TrimEnd('\r').Split(' ', StringSplitOptions.RemoveEmptyEntries);   // CRLF로 받은 파일도
             if (parts.Length == 2) ranks.TryAdd((parts[0], parts[1]), i - 1);
         }
         var pattern = new Regex(@"<\|startoftext\|>|<\|endoftext\|>|'s|'t|'re|'ve|'m|'ll|'d|[\p{L}]+|[\p{N}]|[^\s\p{L}\p{N}]+",

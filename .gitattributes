@@ -1,0 +1,2 @@
+# 토크나이저 데이터는 줄바꿈을 바꾸지 않는다(BPE merges 순위가 줄 단위)
+data/tokenizers/** -text
