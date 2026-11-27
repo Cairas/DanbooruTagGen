@@ -74,7 +74,7 @@
                 <StackPanel Margin="4,4,0,0">
                     <DockPanel Margin="0,0,0,4">
                         <TextBlock DockPanel.Dock="Left" Text="시드" Width="40" VerticalAlignment="Center"/>
-                        <TextBox Text="{Binding SeedText}" ToolTip="-1 또는 빈 칸 = 매번 랜덤. 숫자를 넣으면 그 시드로 고정(재현 가능)."/>
+                        <TextBox Text="{Binding SeedText}" ToolTip="-1 또는 빈 칸 = 매번 랜덤(단, 미리보기 바로 뒤 [생성]은 그 미리보기 시드를 이어 써서 본 줄이 파일 앞쪽에 들어감). 숫자를 넣으면 그 시드로 고정(재현 가능)."/>
                     </DockPanel>
                     <CheckBox Content="줄 내 중복 제거" IsChecked="{Binding DedupeWithinLine}"/>
                     <CheckBox Content="줄 중복 회피" IsChecked="{Binding AvoidDuplicateLines}"/>

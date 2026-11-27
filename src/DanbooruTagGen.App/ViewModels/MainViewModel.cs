@@ -205,7 +205,7 @@ public sealed partial class MainViewModel : ObservableObject
         }
         try
         {
-            if (Environment.ProcessPath is { } exe) System.Diagnostics.Process.Start(exe);
+            if (Environment.ProcessPath is { } exe) System.Diagnostics.Process.Start(exe, AppWriteGuard.AfterRestoreArg);
         }
         catch (System.ComponentModel.Win32Exception)
         {
@@ -302,6 +302,7 @@ public sealed partial class MainViewModel : ObservableObject
         IsLoading = true;
         Status = "태그 데이터 로드 중...";
         var csvPaths = SettingsStore.ResolveCsvPaths(Settings);
+        _rulesStamp = RulesStamp();   // 읽기 전에 잰다(ReloadRulesAsync와 같은 이유)
         // 셋은 서로 독립이라 같이 읽는다(예전엔 차례로 읽어 태그 사전 + 규칙 시간이 그대로 더해졌다).
         var dbTask = Task.Run(() => TagDatabase.LoadFromFiles(csvPaths));
         var conflictsTask = Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
@@ -329,10 +330,24 @@ public sealed partial class MainViewModel : ObservableObject
         Generation.IsMultiRecipeMode = SelectedTabIndex == 0;
 
         IsLoading = false;
-        Status = $"태그 {db.Count:N0}개 로드됨";
+        var loadedStatus = $"태그 {db.Count:N0}개 로드됨";
+        Status = loadedStatus;
 
         StartPresetWatcher();
         StartRulesWatcher();
+
+        // 앱이 꺼져 있던 사이 바뀐 제공 팩도 켤 때 바로 반영한다(⚡ 퀵 갱신과 같은 동작·같은 안전판) — 예전엔 시작 시 새 팩만 넣고
+        // 기존 팩 변경은 퀵 갱신을 누를 때까지 옛 내용이라, 퀵 갱신 전후로 같은 레시피가 다르게 뽑혔다.
+        // 백업 복원이 다시 띄운 실행은 건너뛴다 — 방금 되돌린 제공 팩을 켜자마자 덮어쓰지 않게.
+        if (AppWriteGuard.StartedAfterRestore)
+        {
+            Status = loadedStatus + " · 백업 복원 직후라 켤 때 프리셋 갱신은 건너뜀(필요하면 ⚡ 퀵 갱신)";
+            return;
+        }
+        var outcome = await SyncFromBundleAsync();
+        if (outcome == false) Status = loadedStatus;                   // 바뀐 것 없음 — 시작 문구 그대로
+        else if (outcome == true) Status = loadedStatus + " · 켤 때 " + Status;
+        // null(번들 읽기 실패·재시도 중)은 그 문구를 그대로 둔다
     }
 
     private FileSystemWatcher? _rulesWatcher;
@@ -351,7 +366,7 @@ public sealed partial class MainViewModel : ObservableObject
         _rulesReloadDebounce.Tick += (_, _) =>
         {
             _rulesReloadDebounce!.Stop();
-            ReloadRules();
+            _ = ReloadRulesAsync();
         };
 
         void OnChanged(object sender, FileSystemEventArgs e)
@@ -361,6 +376,7 @@ public sealed partial class MainViewModel : ObservableObject
                 return;
             System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
             {
+                _rulesRetry.OnSourceChanged();   // 새 변경 = 새 재시도 예산(프리셋 워처와 같은 규칙)
                 _rulesReloadDebounce!.Stop();
                 _rulesReloadDebounce.Start();
             });
@@ -391,27 +407,60 @@ public sealed partial class MainViewModel : ObservableObject
             + (AppPaths.DevMode ? " (저장소 data)" : " (exe 옆 data)");
     }
 
-    private async void ReloadRules()
+    /// <summary>규칙 파일 읽기 실패(쓰는 중 잠김) 재시도 — 프리셋 워처와 같은 규칙(변경마다 예산 리셋, 최대 3번).
+    /// 예전엔 한 번 실패하면 "다음 변경 이벤트"까지 옛 규칙이 남았다 — 레시피와 규칙을 같이 고치면 새 레시피 + 옛 규칙으로 뽑혔다.</summary>
+    private readonly PresetSyncRetryGate _rulesRetry = new(maxRetries: 3);
+    /// <summary>마지막으로 읽은 규칙 파일들의 (수정 시각, 크기). 퀵 갱신이 "바뀐 경우에만" 다시 읽는 데 쓴다.</summary>
+    private (DateTime, long, DateTime, long) _rulesStamp;
+
+    private static (DateTime, long, DateTime, long) RulesStamp()
     {
+        static (DateTime, long) Of(string path)
+        {
+            var f = new FileInfo(path);
+            return f.Exists ? (f.LastWriteTimeUtc, f.Length) : (default, -1);
+        }
+        var (c, cl) = Of(AppPaths.ConflictsFile);
+        var (r, rl) = Of(AppPaths.RequiresFile);
+        return (c, cl, r, rl);
+    }
+
+    /// <summary>모순·필수 규칙을 다시 읽는다. <paramref name="onlyIfChanged"/>면 파일이 마지막으로 읽은 뒤 바뀌었을 때만.
+    /// 반환: 새 규칙을 적용했는가.</summary>
+    private async Task<bool> ReloadRulesAsync(bool onlyIfChanged = false)
+    {
+        var stamp = RulesStamp();   // 읽기 전에 잰다 — 읽는 도중 바뀌면 다음 확인에서 다시 읽힌다
+        if (onlyIfChanged && stamp == _rulesStamp) return false;
         try
         {
             var conflicts = await Task.Run(() => Core.Generation.ConflictRules.LoadFromFile(AppPaths.ConflictsFile));
             var requires = await Task.Run(() => Core.Generation.RequiresRules.LoadFromFileOrDefault(AppPaths.RequiresFile));
             Conflicts = conflicts;
             Requires = requires;
+            _rulesStamp = stamp;
+            _rulesRetry.OnSucceeded();
             // 규칙을 소비하는 쪽은 다음 생성부터 새 규칙을 읽지만, 이미 화면에 떠 있는 경고·배지는 옛 규칙으로
             // 계산된 채 남는다 — 방금 고친 규칙이 반영됐는지 확인하려면 재시작해야 했다.
             RecipeBuilder?.RefreshConflicts();
             RecipeLibrary?.RefreshConflictBadges();
             Status = $"모순 규칙 {conflicts.Count}개를 다시 읽었습니다";
+            return true;
+        }
+        catch (IOException ex) when (_rulesReloadDebounce != null && _rulesRetry.TryScheduleRetry())
+        {
+            // 쓰는 중이라 잠긴 경우가 대부분 — 조금 뒤 다시 읽는다(기존 규칙은 그대로).
+            Status = $"모순 규칙 파일을 쓰는 중이라 잠시 뒤 다시 읽습니다({_rulesRetry.Retries}/{_rulesRetry.MaxRetries}) — {ex.Message}";
+            _rulesReloadDebounce.Stop();
+            _rulesReloadDebounce.Start();
+            return false;
         }
         catch (Exception ex)
         {
-            // 파일을 쓰는 중이면 읽기에 실패할 수 있다 — 기존 규칙을 유지하고 다음 변경 이벤트에서 다시 시도한다.
-            // 다만 조용히 넘기면 "고쳤는데 왜 반영이 안 되지"가 되므로 이유는 남긴다.
-            Status = "모순 규칙을 다시 읽지 못해 기존 규칙을 유지합니다(파일을 다시 저장하면 재시도) — " + ex.Message;
+            // 재시도를 다 썼거나 내용 오류 — 기존 규칙을 유지한다. 조용히 넘기면 "고쳤는데 왜 반영이 안 되지"가 되므로 이유는 남긴다.
+            Status = "모순 규칙을 다시 읽지 못해 기존 규칙을 유지합니다(파일을 다시 저장하거나 ⚡ 퀵 갱신) — " + ex.Message;
             // 파일 잠금(IOException)은 편집기가 쓰는 도중에 늘 생기는 일시적 실패라 로그에 안 남긴다 — 내용 오류만 남긴다.
             if (ex is not IOException) AppLog.Exception("모순 규칙 다시 읽기 실패", ex);
+            return false;
         }
     }
 
@@ -549,30 +598,43 @@ public sealed partial class MainViewModel : ObservableObject
     /// 읽는 동안 워처나 버튼이 또 부르면 겹쳐 돌리지 않고 끝난 뒤 한 번 더 돈다 — 겹치면 앞선 실행의
     /// 옛 번들이 나중에 병합돼 방금 저장한 내용을 되돌릴 수 있다.</para></summary>
     [RelayCommand(AllowConcurrentExecutions = true)]
-    private async Task QuickSyncBundledPresetsAsync()
+    private async Task QuickSyncBundledPresetsAsync() => await SyncFromBundleAsync();
+
+    /// <summary>퀵 갱신 본체. 반환: 무언가 바뀌었으면 true, 바뀐 게 없으면 false, 번들을 못 읽었으면(재시도 중 포함) null.
+    /// 이미 돌고 있으면 끝난 뒤 한 번 더 돌도록 표시만 하고 false.</summary>
+    private async Task<bool?> SyncFromBundleAsync()
     {
-        if (_quickSyncRunning) { _quickSyncAgain = true; return; }
+        if (_quickSyncRunning) { _quickSyncAgain = true; return false; }
         _quickSyncRunning = true;
+        bool changedAny = false;
+        bool? last = false;
         try
         {
             do
             {
                 _quickSyncAgain = false;
+                // 레시피와 규칙(implies 표식의 단계 게이팅)은 보통 같이 바뀐다 — 규칙 감시가 놓쳤거나 읽기에 실패했어도
+                // 퀵 갱신 한 번이면 둘 다 맞도록, 규칙 파일이 바뀌었으면 여기서도 다시 읽는다.
+                bool rulesReloaded = await ReloadRulesAsync(onlyIfChanged: true);
                 var (ok, bundled, error) = await Task.Run(() =>
                 {
                     bool loaded = BundledPresetLoader.TryLoad(AppPaths.PresetPoolsFile, AppPaths.PresetRecipesDir, out var b, out var e);
                     return (loaded, b, e);
                 });
-                ApplyQuickSync(ok, bundled, error);
+                last = ApplyQuickSync(ok, bundled, error);
+                changedAny |= last == true || rulesReloaded;
+                if (rulesReloaded) Status = $"모순 규칙 {Conflicts.Count}개 다시 읽음 · " + Status;
             } while (_quickSyncAgain);
         }
         finally { _quickSyncRunning = false; }
+        return last is null ? null : changedAny;
     }
 
     private bool _quickSyncRunning;
     private bool _quickSyncAgain;
 
-    private void ApplyQuickSync(bool loaded, BundledPresets bundled, string error)
+    /// <summary>반환: 바뀌었으면 true, 그대로면 false, 번들을 못 읽었으면 null.</summary>
+    private bool? ApplyQuickSync(bool loaded, BundledPresets bundled, string error)
     {
         if (!loaded)
         {
@@ -583,23 +645,23 @@ public sealed partial class MainViewModel : ObservableObject
             {
                 _presetSyncDebounce?.Start();
                 Status = $"프리셋 갱신 재시도 중({_presetSyncRetry.Retries}/{_presetSyncRetry.MaxRetries})… {error}";
-                return;
+                return null;
             }
             Status = "프리셋 갱신 실패(파일을 고쳐 저장하면 자동으로 다시 시도) — " + error;
             AppLog.Program("번들 프리셋 읽기 실패(자동 갱신)", error + "\n기존 데이터는 그대로 두고 건너뜀. 파일을 고쳐 저장하면 자동으로 다시 읽음.");
             PresetLoadError = "⚠ 번들 읽기 실패: " + error;
-            return;
+            return null;
         }
         _presetSyncRetry.OnSucceeded();
         PresetLoadError = "";
-        ApplyBundledSync(bundled, removalLimit: MaxAutoRemovals);
+        return ApplyBundledSync(bundled, removalLimit: MaxAutoRemovals);
     }
 
     /// <summary>Seed+SyncBundled 실행, 화면 갱신, Status 문구 설정까지 — 확인/완료 UI는 호출부 책임.
-    /// <paramref name="removalLimit"/>보다 많이 제거하게 되면 제거만 보류한다(자동 경로용 안전판).</summary>
-    private void ApplyBundledSync(BundledPresets bundled, int removalLimit = int.MaxValue, bool alreadyBackedUp = false)
+    /// <paramref name="removalLimit"/>보다 많이 제거하게 되면 제거만 보류한다(자동 경로용 안전판). 반환: 무언가 바뀌었는가.</summary>
+    private bool ApplyBundledSync(BundledPresets bundled, int removalLimit = int.MaxValue, bool alreadyBackedUp = false)
     {
-        if (AppWriteGuard.Frozen) return;   // 백업 복원 후 재시작 중
+        if (AppWriteGuard.Frozen) return false;   // 백업 복원 후 재시작 중
         var previousLedger = Settings.SeededPresetIds.ToList();
         var seeded = new HashSet<string>(previousLedger, StringComparer.Ordinal);
         var idsBefore = SavedRecipes.Select(r => r.Id).ToList();
@@ -615,6 +677,7 @@ public sealed partial class MainViewModel : ObservableObject
         var (updated, removed) = PresetSeeder.SyncBundled(
             Pools, bundled.Pools, SavedRecipes, bundled.Recipes, seeded, allowRemoval: !holdRemovals, changedRecipeIds);
         int newRecipes = 0;
+        string builderNote = "";
         if (added || updated > 0 || removed > 0)
         {
             // 🆕/✏️ 표시: 장부 저장보다 먼저 메모리에 반영해 두고, 장부와 함께(또는 맨 끝에) 저장한다.
@@ -653,17 +716,23 @@ public sealed partial class MainViewModel : ObservableObject
             if (!string.IsNullOrEmpty(loadedId) && changedRecipeIds.Contains(loadedId))
             {
                 var fresh = bundled.Recipes.FirstOrDefault(r => r.Id == loadedId);
-                if (fresh != null) RecipeBuilder!.LoadRecipe(fresh);
+                if (fresh != null)
+                {
+                    RecipeBuilder!.LoadRecipe(fresh);
+                    builderNote = $" 편집 탭의 '{fresh.Name}'도 최신으로 다시 불러옴(편집하던 내용은 되돌리기로 복구).";
+                }
             }
         }
         LastSyncText = $"프리셋 확인 {DateTime.Now:HH:mm:ss}";
         Status = (added || updated > 0 || removed > 0
                      ? $"프리셋 갱신 완료 — 기존 {updated}개 교체, 제거 {removed}개, 신규 항목 {(added ? "추가됨" : "없음")}."
                        + (newRecipes > 0 ? $" 새 레시피 {newRecipes}개는 라이브러리에 🆕로 표시됩니다." : "")
+                       + builderNote
                      : "프리셋 갱신 — 바뀐 항목 없음.")
                  + (holdRemovals
                      ? $" (번들에서 빠진 항목 {pendingRemovals}개는 자동 제거를 보류 — 의도한 삭제면 \"⟳ 프리셋 갱신\"으로 적용)"
                      : "");
+        return added || updated > 0 || removed > 0 || holdRemovals;
     }
 
     private void SaveLedger(List<string> ids)

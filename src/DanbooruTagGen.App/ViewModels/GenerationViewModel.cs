@@ -97,6 +97,11 @@ public sealed partial class GenerationViewModel : ObservableObject
     /// 빈 칸으로 두면 "설정을 깜빡한 건가 랜덤인 건가" 헷갈릴 수 있어, 기본값 자체를
     /// -1로 명시해 화면에 보이게 했다.</summary>
     [ObservableProperty] private string _seedText = "-1";
+    /// <summary>시드 자동일 때 미리보기 시드를 다음 생성에 이어 쓴다(<see cref="SeedCarry"/>).</summary>
+    private readonly SeedCarry _seedCarry = new();
+    /// <summary>이번 실행의 시드가 직전 미리보기에서 이어 쓴 것인지(상태 문구용).</summary>
+    private bool _lastSeedCarried;
+    partial void OnSeedTextChanged(string value) => _seedCarry.Reset();
     [ObservableProperty] private bool _dedupeWithinLine = true;
     [ObservableProperty] private bool _avoidDuplicateLines = true;
     [ObservableProperty] private bool _avoidConflicts = true;
@@ -884,17 +889,15 @@ public sealed partial class GenerationViewModel : ObservableObject
         var opts = BuildOptions();
         // 시드를 비워뒀으면(자동) 여기서 직접 하나 뽑아 못박는다 — SystemRandomSource에 null을
         // 넘기면 내부에서 알아서 뽑긴 하지만 그 값을 밖에서 확인할 방법이 없어진다.
-        _lastSeedUsed = opts.Seed ?? Random.Shared.Next();
+        // 자동 시드면 [생성]은 직전 미리보기 시드를 이어 쓴다 — 미리보기에서 본 줄이 파일 앞쪽에 그대로 들어간다.
+        (_lastSeedUsed, _lastSeedCarried) = _seedCarry.Next(opts.Seed, preview, Random.Shared.Next);
         // 마스터 목록을 읽는다. BatchItems는 검색어로 걸러진 표시용이라, 레시피를 체크해 둔 뒤
         // 검색창에 무언가를 입력하면 가려진 항목이 조용히 생성에서 빠졌다(성공으로 끝나므로
         // 눈치채기도 어려웠다). 검색은 "무엇을 보여줄지"만 정해야지 "무엇을 생성할지"를
         // 정해서는 안 된다.
         var sources = IsMultiRecipeMode
             ? _allBatchItems.Where(b => b.IsChecked).Select(b => (Recipe: b.Recipe, Key: b.Recipe.Id, Lines: b.LineCountOverride ?? LineCount)).ToList()
-            : new List<(Recipe Recipe, string Key, int Lines)> { (_main.RecipeBuilder.BuildRecipe(), BuilderLockKey(), LineCount) };
-        // 미리보기는 "몇 줄 확인"용: 레시피 여러 개면 레시피마다 3줄, 하나면 10줄.
-        int previewEach = sources.Count > 1 ? PreviewLinesPerRecipe : PreviewLinesSingle;
-        var lineCounts = sources.Select(s => preview ? Math.Min(previewEach, s.Lines) : s.Lines).ToList();
+            : new List<(Recipe Recipe, string Key, int Lines)> { (_main.RecipeBuilder.BuildRecipeForRun(), BuilderLockKey(), LineCount) };
         var recipes = sources.Select(s => Clone(s.Recipe)).ToList();
         var lockKeys = sources.Select(s => s.Key).ToList();
 
@@ -905,11 +908,15 @@ public sealed partial class GenerationViewModel : ObservableObject
         var locked = lockKeys.Select(k => lockedByKey.GetValueOrDefault(k) ?? Array.Empty<LockedLine>()).ToList();
         int droppedLocks = lockedByKey.Where(kv => !lockKeys.Contains(kv.Key)).Sum(kv => kv.Value.Count);
 
+        // 미리보기는 "몇 줄 확인"용: 레시피 여러 개면 레시피마다 3줄, 하나면 10줄(잠근 줄은 그 밖에 따로).
+        int previewEach = sources.Count > 1 ? PreviewLinesPerRecipe : PreviewLinesSingle;
+        var lineCounts = sources.Select((s, i) => RunLineCounts.Total(s.Lines, locked[i].Count, preview, previewEach)).ToList();
+
         var pools = _main.Pools.ToDictionary(p => p.Id);
 
         // 훅은 복사본에만 끼운다 — 원본 레시피는 절대 건드리지 않는다. 일괄·단일 두 경로가
         // 모두 여기를 지나므로 훅은 자동으로 양쪽(미리보기 포함)에 적용된다.
-        var hooks = _main.Hooks.Where(h => h.IsEnabled).OrderBy(h => h.Order).ToList();
+        var hooks = EnabledHooks();
         var skipped = new List<string>();
         foreach (var recipe in recipes)
             foreach (var name in HookApplier.Apply(recipe, hooks, pools))
@@ -917,6 +924,21 @@ public sealed partial class GenerationViewModel : ObservableObject
         _skippedHooks = skipped;
 
         return new GenerationJob(recipes, pools, opts, lineCounts, _lastSeedUsed, lockKeys, locked, droppedLocks);
+    }
+
+    private List<GenerationHook> EnabledHooks() => _main.Hooks.Where(h => h.IsEnabled).OrderBy(h => h.Order).ToList();
+
+    /// <summary>레시피 하나를 생성 카드와 똑같이(옵션·켜진 훅·품질 태그, 시드는 카드 칸 — 비었으면 무작위) <paramref name="count"/>줄 뽑는다.
+    /// 라이브러리 "샘플 미리보기"용 — 예전엔 따로 정한 기본값(균등 추첨·자동 정렬 끔·훅 없음)이라 카드 미리보기·실제 파일과 다르게 나왔다.</summary>
+    internal (IReadOnlyList<string> Lines, int Seed) SampleLines(Recipe recipe, int count)
+    {
+        var opts = BuildOptions();
+        int seed = opts.Seed ?? Random.Shared.Next();
+        var copy = Clone(recipe);
+        var pools = _main.Pools.ToDictionary(p => p.Id);
+        HookApplier.Apply(copy, EnabledHooks(), pools);
+        var result = _generator.Generate(copy, pools, CopyWith(opts, count, seed), _main.Conflicts, _main.TagInfo);
+        return (ApplyQualityTags(result).Lines, seed);
     }
 
     /// <summary>조합이 바닥나 요청보다 적게 뽑은 레시피 요약(상태 메시지 꼬리). 레시피별 경고 문구는 이걸로 대신한다.</summary>
@@ -1334,6 +1356,7 @@ public sealed partial class GenerationViewModel : ObservableObject
                 where = path;
             }
 
+            _seedCarry.Written();   // 파일에 썼다 — 다음 생성은 새 시드
             _main.Settings.LastOutputDir = Path.GetDirectoryName(OutputPath) ?? "";
             SaveSettings();
             SaveGenerationRecord(job, outputs);
@@ -1346,10 +1369,12 @@ public sealed partial class GenerationViewModel : ObservableObject
             ConflictReport = BuildConflictReport(result);
             ResultSummaryText = (outputs.Count > 1 ? $"✓ {outputs.Count}개 레시피 " : "✓ ")
                 + $"{result.Lines.Count:N0}줄 → {(SplitFilesPerRecipe && IsMultiRecipeMode ? where : Path.GetFileName(path))} · {ModeText(mode)} · 시드 {_lastSeedUsed}"
+                + (_lastSeedCarried ? "(미리보기 시드 이어 씀)" : "")
                 + LockNote(job);
             AutoOpenResultsIfWanted();
             var warns = OtherWarnings(result).ToList();
-            _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {where} (시드 {_lastSeedUsed})"
+            _main.Status = $"{result.Lines.Count}줄 {Mode} 완료 → {where} (시드 {_lastSeedUsed}"
+                + (_lastSeedCarried ? " · 미리보기 시드 이어 씀)" : ")")
                 + (warns.Count > 0 ? " (" + string.Join(", ", warns) + ")" : "")
                 + ExhaustedNote(job, outputs) + LockNote(job) + SkippedHookNote();
         }

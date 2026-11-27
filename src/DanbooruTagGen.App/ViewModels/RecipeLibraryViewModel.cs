@@ -926,23 +926,18 @@ public sealed partial class RecipeLibraryViewModel : ObservableObject
         catch (OperationCanceledException) { AuditSummary = "검사 취소됨"; }
     }
 
-    /// <summary>빌더 상태를 건드리지 않고 선택 레시피만으로 5줄 뽑아 보여준다. 생성 탭의
-    /// 사용자 설정과 무관하게 합리적인 기본값(중복 회피·모순 회피·슬롯 단위 로컬 필터 켜짐, 균등 추첨)을 쓴다 —
-    /// "부족한 점 훑어보기" 용도라 매번 옵션을 맞출 필요가 없게.
-    /// <para>로컬 필터를 켜는 이유: 단계 게이팅(implies 표식 + 모순 규칙)을 쓰는 팩은 줄 단위 재추첨만으로는
-    /// 모순을 거의 못 피한다(실측: 일부 팩은 60줄 중 50~58줄에 모순이 남음, 로컬 필터를 켜면 0줄). 꺼 둔 채
-    /// 미리보기를 보여 주면 실제 생성(로컬 필터 켬)과 전혀 다른 깨진 줄을 보고 판단하게 된다.</para></summary>
+    /// <summary>빌더 상태를 건드리지 않고 선택 레시피만으로 5줄 뽑아 보여준다. 생성 카드와 같은 설정으로 뽑는다
+    /// (<see cref="GenerationViewModel.SampleLines"/>) — 예전엔 따로 정한 기본값(균등 추첨·자동 정렬 끔·훅 없음)이라
+    /// 같은 레시피인데 카드 미리보기·실제 파일과 태그 순서·구성이 다르게 보였다.</summary>
     [RelayCommand]
     private void QuickPreview()
     {
         if (SelectedRecipe == null) return;
         try
         {
-            var pools = _main.Pools.ToDictionary(p => p.Id);
-            var opts = new Core.Models.GenerationOptions { LineCount = 5, Seed = Random.Shared.Next(), LocalConflictFiltering = true };
-            var generator = new Core.Generation.WildcardGenerator();
-            var result = generator.Generate(SelectedRecipe, pools, opts, _main.Conflicts, _main.TagInfo);
-            QuickPreviewText = string.Join("\n", result.Lines);
+            var (lines, seed) = _main.Generation.SampleLines(SelectedRecipe, 5);
+            QuickPreviewText = string.Join("\n", lines);
+            _main.Status = $"샘플 {lines.Count}줄 — 생성 카드 설정 그대로 · 시드 {seed}";
         }
         catch (Core.Generation.GenerationValidationException ex)
         {

@@ -207,6 +207,8 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
                 {
                     foreach (var s in recipe.Slots) Slots.Add(s);
                     SelectedSlot = Slots[0];
+                    // 어느 레시피를 편집 중이었는지도 되살린다 — 없으면 재시작 뒤 퀵 갱신이 편집 탭을 못 맞춘다.
+                    LoadedRecipeId = BuilderSession.LinkedId(recipe, _main.SavedRecipes);
                     return;
                 }
             }
@@ -263,7 +265,7 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
     {
         if (AppWriteGuard.Frozen) return;   // 백업 복원 후 재시작 중
         AppPaths.EnsureAppDataDir();
-        RecipeStore.Save(BuildRecipe(), AppPaths.LastRecipeFile);
+        RecipeStore.Save(BuilderSession.Autosave(Slots, LoadedRecipeId), AppPaths.LastRecipeFile);
         _main.Status = "레시피 저장됨";
     }
 
@@ -386,17 +388,24 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
 
     public Recipe BuildRecipe() => new() { Name = "Untitled", Slots = Slots.ToList() };
 
+    /// <summary>생성·미리보기용 사본 — 이어진 레시피의 id·이름을 단다(<see cref="BuilderSession.ForRun"/>).</summary>
+    public Recipe BuildRecipeForRun() => BuilderSession.ForRun(Slots, LoadedRecipeId, _main.SavedRecipes);
+
     /// <summary>바깥에서 슬롯 구성을 통째로 갈아엎기 직전에 부른다(컨셉 빌더 위저드).
-    /// 지금 구성을 되돌리기 스택에 넣어 두어, 실수로 눌러도 편집 중이던 내용을 되찾을 수 있게 한다.</summary>
+    /// 지금 구성을 되돌리기 스택에 넣어 두어, 실수로 눌러도 편집 중이던 내용을 되찾을 수 있게 한다.
+    /// 불러온 레시피와의 연결도 끊는다 — 남겨 두면 그 레시피가 퀵 갱신으로 바뀔 때 새로 만든 구성이 덮어써진다.</summary>
     public void RecordSlotsBeforeReplace(string label)
     {
         var previous = Slots.ToList();
+        var previousId = LoadedRecipeId;
+        LoadedRecipeId = null;
         if (previous.Count == 0) return;
         Record($"{label} (이전 구성 {previous.Count}슬롯)", () =>
         {
             Slots.Clear();
             foreach (var slot in previous) Slots.Add(slot);
             SelectedSlot = Slots.FirstOrDefault();
+            LoadedRecipeId = previousId;
         });
     }
 
@@ -411,13 +420,14 @@ public sealed partial class RecipeBuilderViewModel : ObservableObject
         // 교체 직전 구성을 통째로 기억해 둔다 — "불러오기"는 지금까지 되돌릴 수 없는 채로
         // 편집 중이던 내용을 전부 날렸다.
         var previous = Slots.ToList();
+        var previousId = LoadedRecipeId;
         if (previous.Count > 0)
             Record($"'{recipe.Name}' 불러오기 (이전 구성 {previous.Count}슬롯)", () =>
             {
                 Slots.Clear();
                 foreach (var s in previous) Slots.Add(s);
                 SelectedSlot = Slots.FirstOrDefault();
-                LoadedRecipeId = null;
+                LoadedRecipeId = previousId;   // 되돌리면 이전 구성의 레시피 연결도 돌아온다
             });
         Slots.Clear();
         foreach (var slot in copy.Slots) Slots.Add(slot);

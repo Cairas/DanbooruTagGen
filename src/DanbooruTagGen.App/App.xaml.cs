@@ -8,6 +8,7 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        if (e.Args.Contains(Services.AppWriteGuard.AfterRestoreArg)) Services.AppWriteGuard.MarkStartedAfterRestore();
 
         // 실행 중 튀어나온 예외로 창이 그냥 사라지지 않게 한다. 이 앱은 스크립트가 data/presets를
         // 고치는 동안 계속 띄워 두고 쓰는 물건이라, 파일 잠금 같은 일시적 실패로 죽으면 편집 중인

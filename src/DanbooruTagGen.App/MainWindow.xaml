@@ -32,7 +32,7 @@
                 <Button Content="⟳ 프리셋 갱신" Command="{Binding SyncBundledPresetsCommand}" Margin="4,2"
                         ToolTip="제공 축 풀·컨셉 팩을 최신 내용으로 갱신합니다. 바뀔 레시피를 먼저 보여 주고 확인받습니다."/>
                 <Button Content="⚡ 퀵 갱신" Command="{Binding QuickSyncBundledPresetsCommand}" Margin="4,2"
-                        ToolTip="확인 없이 바로 갱신합니다(결과는 상태 표시줄에). 동작은 위 버튼과 같습니다."/>
+                        ToolTip="확인 없이 바로 갱신합니다(결과는 상태 표시줄에). 동작은 위 버튼과 같고, 모순 규칙 파일이 바뀌었으면 규칙도 다시 읽습니다."/>
                 <Separator/>
                 <Menu Background="Transparent" VerticalAlignment="Center">
                     <MenuItem Header="도구 ▾" Padding="6,2">

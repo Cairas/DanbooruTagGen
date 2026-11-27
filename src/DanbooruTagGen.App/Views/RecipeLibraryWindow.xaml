@@ -181,7 +181,7 @@
                 <WrapPanel DockPanel.Dock="Top">
                     <Button Content="샘플 5줄 미리보기" Padding="6,1" Margin="0,0,4,2"
                             Command="{Binding QuickPreviewCommand}"
-                            ToolTip="빌더를 안 건드리고 이 레시피로만 5줄을 즉석에서 뽑아봅니다."/>
+                            ToolTip="빌더를 안 건드리고 이 레시피로만 5줄을 뽑아봅니다 — 생성 카드와 같은 설정(옵션·켜진 훅·품질 태그·시드 칸)."/>
                     <Menu Background="Transparent" Margin="0,0,0,2">
                         <MenuItem Header="더보기 ▾" Padding="6,1" BorderBrush="#B9C1C9" BorderThickness="1">
                             <MenuItem Header="점검 (검증·모순·조합·길이·억제)" Command="{Binding CheckSelectedCommand}"
